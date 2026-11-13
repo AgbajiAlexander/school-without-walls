@@ -4,7 +4,7 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 
 | Task | Deliverable | Acceptance criteria | Dependencies |
 |---|---|---|---|
-| SWW-001 | Repository scaffold, CI, API health/ready, local DB/migration workflow | Next.js boots; Go `health/ready` passes; no secrets committed; CI runs | None |
+| [x] SWW-001 | Repository scaffold, CI, API health/ready, local DB/migration workflow | Next.js boots; Go `health/ready` passes; no secrets committed; CI runs | None |
 | SWW-002 | Identity/session + invitations | Login/invite/reset/logout and negative tests pass; roles not client-controlled | 001 |
 | SWW-003 | Tenant provisioning + school settings | Two tenants independently configured; verified identity/membership checks; tenant isolation tests pass | 002 |
 | SWW-004 | Academic year, terms, levels, subjects and teacher assignments | Structural validation, assigned permissions and tenant constraints | 003 |
