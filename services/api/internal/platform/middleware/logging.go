@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -37,11 +38,23 @@ func Logger() func(next http.Handler) http.Handler {
 			logger.Info("http_request",
 				slog.String("request_id", reqID),
 				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
+				slog.String("path", redactedPath(r.URL.Path)),
 				slog.Int("status", rw.statusCode),
 				slog.Duration("latency", duration),
-				slog.String("remote_addr", r.RemoteAddr),
 			)
 		})
 	}
+}
+
+func redactedPath(path string) string {
+	const invitationPrefix = "/api/v1/invitations/"
+	if !strings.HasPrefix(path, invitationPrefix) {
+		return path
+	}
+	rest := strings.TrimPrefix(path, invitationPrefix)
+	separator := strings.IndexByte(rest, '/')
+	if separator < 0 {
+		return invitationPrefix + "[redacted]"
+	}
+	return invitationPrefix + "[redacted]" + rest[separator:]
 }

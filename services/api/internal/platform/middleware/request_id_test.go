@@ -7,6 +7,14 @@ import (
 	"testing"
 )
 
+func TestRedactedPathHidesInvitationTokens(t *testing.T) {
+	got := redactedPath("/api/v1/invitations/secret-token-123/verify")
+	want := "/api/v1/invitations/[redacted]/verify"
+	if got != want {
+		t.Fatalf("expected redacted path %q, got %q", want, got)
+	}
+}
+
 func TestRequestIDMiddlewareGeneratesNewID(t *testing.T) {
 	handler := RequestID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		reqID := GetRequestID(r.Context())

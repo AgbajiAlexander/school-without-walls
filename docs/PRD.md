@@ -305,8 +305,10 @@ Base prefix `/api/v1`; JSON with consistent envelope `{data, meta}` or `{error:{
 |---|---|---|
 | POST `/platform/tenants` | Platform admin | provision tenant/invitation |
 | GET/PATCH `/schools/current` | Owner/admin | branding and settings |
-| POST `/auth/login`; `/auth/logout`; `/auth/password-reset` | User | rate-limit and secure cookie session |
-| POST `/invitations`; POST `/invitations/accept` | Owner/admin / invitee | signed one-use invite |
+| POST `/auth/login`; `/auth/forgot-password`; `/auth/reset-password`; POST `/auth/logout` | User | rate-limit, secure cookie session, CSRF on authenticated mutations |
+| GET `/auth/me`; GET `/auth/sessions`; DELETE `/auth/sessions/{id}` | Authenticated user | own account/session only |
+| GET `/invitations/{token}/verify`; POST `/invitations/accept` | Invitee | single-use invitation; verification does not reveal a role |
+| POST `/invitations` | Owner/admin (future tenant workflow) | issue a time-limited, single-use invitation |
 | GET/POST `/students` | Admin | `tenant_id` internal; scoped list |
 | GET/PATCH `/students/{id}` | Authorized users | field projections differ by role |
 | POST `/students/{id}/guardians` | Admin | validates same-school relation |

@@ -65,6 +65,12 @@ Or run using the provided PowerShell script:
 .\scripts\migrate.ps1 down
 ```
 
+### Authentication development notes
+
+- Password-reset email is sent only when the API has SMTP settings configured; the SMTP server must support STARTTLS. Use local-only values and never commit `.env` files.
+- The initial platform administrator bootstrap is development-only. It requires `SERVER_ENV=development`, `SWW_ENABLE_DEV_BOOTSTRAP=true`, and explicit `BOOTSTRAP_ADMIN_EMAIL`, `BOOTSTRAP_ADMIN_NAME` and `BOOTSTRAP_ADMIN_PASSWORD` inputs. Do not enable it outside local development.
+- Authentication PostgreSQL integration tests require `SWW_TEST_DATABASE_URL` to point to a dedicated test database whose name contains `test`. The test creates and removes an isolated schema.
+
 ---
 
 ## CI / Automated Checks

@@ -11,6 +11,15 @@ Status: Proposed ADR baseline (13 November 2026). The PRD is the source for beha
 - **Files:** private S3-compatible object storage; short-lived signed URLs, content-type validation and virus scan pipeline before file is released.
 - **Ops:** Vercel frontend; Go backend on capable host; managed PostgreSQL; separate dev/staging/prod secrets and datasets; CI (Go + frontend + E2E), structured monitoring, backup and restore.
 
+## Global authentication boundary
+
+- `users` is a global identity table; authentication does not assign school roles. `platform_admins` is an explicit global operator grant, not a school membership. Tenant memberships and school-specific RBAC are introduced in SWW-003.
+- Migrations `000002_auth_identity` and `000003_auth_hardening` hold identities, sessions, invitations, password-reset tokens, audit events, platform-admin grants and shared rate-limit state. Invitation, reset and session tokens are stored as hashes; lifecycle operations that consume tokens, revoke sessions and write audit events use transactions.
+- `/api/v1/auth` exposes `POST /login`, `POST /forgot-password`, `POST /reset-password`, `GET /me`, `POST /logout`, `GET /sessions` and `DELETE /sessions/{id}`. Invitation endpoints are `GET /api/v1/invitations/{token}/verify` and `POST /api/v1/invitations/accept`. The browser never supplies an authoritative role.
+- Browser sessions use HttpOnly `SameSite=Lax` cookies; production and staging use `Secure` `__Host-` cookies. Unsafe authenticated requests also require a CSRF header matching the session-bound CSRF cookie/hash. Mutating requests are checked against configured origins and rejected when Fetch Metadata identifies a cross-site request. Forwarded client IPs are trusted only from configured proxy CIDRs.
+- Authentication rate limits use PostgreSQL so all API instances share counters. Reset email delivery requires configured SMTP with STARTTLS; without SMTP, the reset-request flow is unavailable rather than returning an undelivered success.
+- The bootstrap command creates only the first global platform administrator and runs only when `SERVER_ENV=development` and `SWW_ENABLE_DEV_BOOTSTRAP=true`; it requires explicit email, name and password inputs. Never use this path in staging or production.
+
 ## Tenant request flow
 
 1. Resolve requested tenant from trusted host/path mapping and verify it exists/is active.

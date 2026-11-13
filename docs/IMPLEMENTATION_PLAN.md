@@ -5,7 +5,7 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | Task | Deliverable | Acceptance criteria | Dependencies |
 |---|---|---|---|
 | [x] SWW-001 | Repository scaffold, CI, API health/ready, local DB/migration workflow | Next.js boots; Go `health/ready` passes; no secrets committed; CI runs | None |
-| SWW-002 | Identity/session + invitations | Login/invite/reset/logout and negative tests pass; roles not client-controlled | 001 |
+| [ ] SWW-002 | Identity/session + invitations | Login, invitation acceptance, reset, logout, CSRF, revocation and abuse tests pass; PostgreSQL lifecycle integration passes; roles not client-controlled | 001 |
 | SWW-003 | Tenant provisioning + school settings | Two tenants independently configured; verified identity/membership checks; tenant isolation tests pass | 002 |
 | SWW-004 | Academic year, terms, levels, subjects and teacher assignments | Structural validation, assigned permissions and tenant constraints | 003 |
 | SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004 |
@@ -17,6 +17,10 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-011 | Early Years observations + parental dashboard | Qualitative reports; child-specific view; no forced numeric mark | 005,010 |
 | SWW-012 | Go AI gateway + teacher drafts + student tutor | No exposed secrets, age/tenant gating, human review, safety tests | 006,007 |
 | SWW-013 | E2E hardening, docs, deployment | CI/E2E/security/mobile checks; Vercel + Go HTTPS; backup restore tested | All |
+
+### SWW-002 validation gate
+
+The implementation adds migration `000003_auth_hardening` and a PostgreSQL lifecycle integration test. Run `go test ./...` from `services/api`; set `SWW_TEST_DATABASE_URL` only to an isolated database whose name contains `test` to execute the database-backed lifecycle test. Do not mark SWW-002 complete while that test is skipped or fails. The CI race-detector check is also required before acceptance.
 
 ## Sprint rhythm (not calendar commitments)
 

@@ -13,6 +13,13 @@ func TestConfigLoadDefaults(t *testing.T) {
 	os.Unsetenv("DATABASE_MAX_CONNS")
 	os.Unsetenv("DATABASE_MIN_CONNS")
 	os.Unsetenv("CORS_ALLOWED_ORIGINS")
+	os.Unsetenv("TRUSTED_PROXY_CIDRS")
+	os.Unsetenv("PUBLIC_WEB_URL")
+	os.Unsetenv("SMTP_HOST")
+	os.Unsetenv("SMTP_PORT")
+	os.Unsetenv("SMTP_USERNAME")
+	os.Unsetenv("SMTP_PASSWORD")
+	os.Unsetenv("SMTP_FROM")
 
 	cfg, err := Load()
 	if err != nil {
@@ -43,6 +50,7 @@ func TestConfigLoadCustom(t *testing.T) {
 	os.Setenv("DATABASE_MAX_CONNS", "50")
 	os.Setenv("DATABASE_MIN_CONNS", "10")
 	os.Setenv("CORS_ALLOWED_ORIGINS", "https://sww.example.com, https://admin.sww.example.com")
+	os.Setenv("PUBLIC_WEB_URL", "https://sww.example.com")
 	defer func() {
 		os.Unsetenv("SERVER_PORT")
 		os.Unsetenv("SERVER_ENV")
@@ -50,6 +58,14 @@ func TestConfigLoadCustom(t *testing.T) {
 		os.Unsetenv("DATABASE_MAX_CONNS")
 		os.Unsetenv("DATABASE_MIN_CONNS")
 		os.Unsetenv("CORS_ALLOWED_ORIGINS")
+		os.Unsetenv("PUBLIC_WEB_URL")
+		os.Unsetenv("TRUSTED_PROXY_CIDRS")
+		os.Unsetenv("PUBLIC_WEB_URL")
+		os.Unsetenv("SMTP_HOST")
+		os.Unsetenv("SMTP_PORT")
+		os.Unsetenv("SMTP_USERNAME")
+		os.Unsetenv("SMTP_PASSWORD")
+		os.Unsetenv("SMTP_FROM")
 	}()
 
 	cfg, err := Load()
@@ -81,5 +97,17 @@ func TestConfigInvalidPort(t *testing.T) {
 	_, err := Load()
 	if err == nil {
 		t.Fatal("expected error for invalid port, got nil")
+	}
+}
+
+func TestConfigRejectsInvalidEnvironmentAndWildcardCredentialedCORS(t *testing.T) {
+	t.Setenv("SERVER_ENV", "prod")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected invalid environment to fail closed")
+	}
+	t.Setenv("SERVER_ENV", "development")
+	t.Setenv("CORS_ALLOWED_ORIGINS", "*")
+	if _, err := Load(); err == nil {
+		t.Fatal("expected wildcard credentialed CORS origin to be rejected")
 	}
 }
