@@ -12,22 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_DB: sww_ci_test
-          POSTGRES_USER: sww_ci
-          POSTGRES_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U sww_ci -d sww_ci_test"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
-      SWW_TEST_DATABASE_URL: postgres://sww_ci:${{ secrets.GITHUB_TOKEN }}@localhost:5432/sww_ci_test?sslmode=disable
       SWW_REQUIRE_POSTGRES_TESTS: "1"
     steps:
       - name: Checkout repository
@@ -38,6 +23,33 @@ jobs:
         with:
           go-version: '1.24.0'
           cache-dependency-path: services/api/go.sum
+
+      - name: Start isolated PostgreSQL 16 test database
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_password="$(openssl rand -hex 32)"
+          echo "::add-mask::$database_password"
+          printf 'SWW_TEST_DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_ci_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
+          export POSTGRES_PASSWORD="$database_password"
+          docker run --detach --name sww-backend-postgres \
+            --publish 5432:5432 \
+            --env POSTGRES_DB=sww_ci_test \
+            --env POSTGRES_USER=sww_ci \
+            --env POSTGRES_PASSWORD \
+            --health-cmd "pg_isready -U sww_ci -d sww_ci_test" \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 12 \
+            postgres:16
+          for attempt in $(seq 1 30); do
+            if docker exec sww-backend-postgres pg_isready -U sww_ci -d sww_ci_test >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Disposable PostgreSQL test database did not become ready."
+          exit 1
 
       - name: Verify Go dependencies
         working-directory: services/api
@@ -56,7 +68,7 @@ jobs:
         run: go test -race ./...
 
   frontend-check:
-    name: Frontend (Next.js) Typecheck & Build
+    name: Frontend (Next.js) Tests, Typecheck & Build
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -71,7 +83,19 @@ jobs:
 
       - name: Install dependencies
         working-directory: apps/web
-        run: npm ci || npm install
+        run: npm ci
+
+      - name: Frontend unit and component tests
+        working-directory: apps/web
+        run: npm run test:ci
+
+      - name: CSP and security-header tests
+        working-directory: apps/web
+        run: npm run test:security
+
+      - name: Frontend lint
+        working-directory: apps/web
+        run: npm run lint
 
       - name: TypeScript typecheck
         working-directory: apps/web
@@ -80,3 +104,101 @@ jobs:
       - name: Production build
         working-directory: apps/web
         run: npm run build
+
+  browser-e2e:
+    name: Browser Authentication & CSP E2E
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.0'
+          cache-dependency-path: services/api/go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Create isolated PostgreSQL 16 and fictional E2E identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          database_password="$(openssl rand -hex 32)"
+          admin_password="$(python3 -c 'import secrets, string; groups=(string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%^&*_-"); chars=[secrets.choice(group) for group in groups]; alphabet="".join(groups); chars.extend(secrets.choice(alphabet) for _ in range(28)); secrets.SystemRandom().shuffle(chars); print("".join(chars))')"
+          echo "::add-mask::$database_password"
+          echo "::add-mask::$admin_password"
+          printf 'DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_e2e_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
+          printf 'SWW_TEST_DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_e2e_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
+          printf 'BOOTSTRAP_ADMIN_EMAIL=ci-admin@example.test\n' >> "$GITHUB_ENV"
+          printf 'BOOTSTRAP_ADMIN_NAME=Fictional Test User\n' >> "$GITHUB_ENV"
+          printf 'BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$admin_password" >> "$GITHUB_ENV"
+          printf 'E2E_ADMIN_EMAIL=ci-admin@example.test\n' >> "$GITHUB_ENV"
+          printf 'E2E_ADMIN_PASSWORD=%s\n' "$admin_password" >> "$GITHUB_ENV"
+          printf 'CORS_ALLOWED_ORIGINS=https://127.0.0.1:3443\n' >> "$GITHUB_ENV"
+          printf 'PUBLIC_WEB_URL=https://127.0.0.1:3443\n' >> "$GITHUB_ENV"
+          printf 'API_INTERNAL_URL=http://127.0.0.1:8080\n' >> "$GITHUB_ENV"
+          tls_certificate="${RUNNER_TEMP}/sww-e2e.crt"
+          tls_private_key="${RUNNER_TEMP}/sww-e2e.key"
+          printf 'E2E_TLS_CERT=%s\n' "$tls_certificate" >> "$GITHUB_ENV"
+          printf 'E2E_TLS_KEY=%s\n' "$tls_private_key" >> "$GITHUB_ENV"
+          export POSTGRES_PASSWORD="$database_password"
+          docker run --detach --name sww-e2e-postgres \
+            --publish 5432:5432 \
+            --env POSTGRES_DB=sww_e2e_test \
+            --env POSTGRES_USER=sww_ci \
+            --env POSTGRES_PASSWORD \
+            --health-cmd "pg_isready -U sww_ci -d sww_e2e_test" \
+            --health-interval 5s \
+            --health-timeout 5s \
+            --health-retries 12 \
+            postgres:16
+          for attempt in $(seq 1 30); do
+            if docker exec sww-e2e-postgres pg_isready -U sww_ci -d sww_e2e_test >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Disposable PostgreSQL E2E database did not become ready."
+              exit 1
+            fi
+            sleep 2
+          done
+          openssl req -x509 -newkey rsa:2048 -sha256 -nodes -days 1 \
+            -keyout "$tls_private_key" \
+            -out "$tls_certificate" \
+            -subj "/CN=127.0.0.1" \
+            -addext "subjectAltName=IP:127.0.0.1"
+
+      - name: Apply migrations to disposable E2E database
+        working-directory: services/api
+        run: go run ./cmd/migrate up
+
+      - name: Create the fictional development-bootstrap administrator
+        working-directory: services/api
+        env:
+          SERVER_ENV: development
+          SWW_ENABLE_DEV_BOOTSTRAP: "true"
+        run: go run ./cmd/bootstrap --email "$BOOTSTRAP_ADMIN_EMAIL" --name "$BOOTSTRAP_ADMIN_NAME"
+
+      - name: Build production frontend
+        working-directory: apps/web
+        run: npm run build
+
+      - name: Install Playwright Chromium and system dependencies
+        working-directory: apps/web
+        run: npx playwright install --with-deps chromium
+
+      - name: Run real-browser authentication and CSP tests
+        working-directory: apps/web
+        run: npm run test:e2e

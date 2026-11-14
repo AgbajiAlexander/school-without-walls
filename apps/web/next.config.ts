@@ -1,4 +1,5 @@
 import type { NextConfig } from "next";
+import { getBaselineSecurityHeaders } from "./src/lib/security-headers.mjs";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
@@ -16,11 +17,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [{
       source: "/:path*",
-      headers: [
-        { key: "Referrer-Policy", value: "no-referrer" },
-        { key: "X-Content-Type-Options", value: "nosniff" },
-        { key: "X-Frame-Options", value: "DENY" },
-      ],
+      headers: getBaselineSecurityHeaders(),
     }];
   },
 };

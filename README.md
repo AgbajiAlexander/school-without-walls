@@ -93,5 +93,51 @@ plan separately and only with explicit database-owner approval.
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request to `main`:
 - Go module verification, uncached tests (`go test -count=1 ./...`), vet and race-detector tests
-- PostgreSQL 16 service with an explicitly named disposable `sww_ci_test` database; required integration tests fail rather than skip if the test database configuration is missing
-- Frontend TypeScript typechecking (`tsc --noEmit`) and production build (`next build`)
+- Isolated PostgreSQL 16 containers with explicitly named disposable test databases; each database-using job generates and masks its own random password, and required backend integration tests fail rather than skip when configuration is missing
+- Frontend unit/component tests, CSP helper tests, TypeScript typechecking and production build
+- Production-built Playwright authentication and CSP tests against the real Go API and a separate disposable PostgreSQL database, served through a temporary local HTTPS proxy with fictional bootstrap credentials
+
+## Frontend Security Headers
+
+The Next.js app applies `Referrer-Policy: no-referrer`,
+`X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, and a restrictive
+`Permissions-Policy`. Production document responses use a per-request nonce
+Content Security Policy. The nonce is passed on the request to Next.js so its
+App Router scripts can be rendered with the matching nonce; the same policy is
+returned on the response. The policy does not allow `unsafe-inline` or
+`unsafe-eval` scripts and currently permits only same-origin application
+connections and assets (plus `data:` images).
+
+Nonce-based CSP requires request-time rendering. The root layout reads request
+headers so Next.js can apply each request's nonce to its App Router scripts;
+consequently, pages that might otherwise be statically rendered or cached are
+rendered dynamically.
+The middleware excludes API routes and static/image assets. Development does not
+apply the production CSP, and HSTS is sent only for production HTTPS document
+requests; local HTTP remains usable. The SWW-003H-C3 Playwright suite checks
+nonce matching, hydration and client navigation in a real browser; its GitHub
+Actions execution is still required before those checks can be considered
+verified.
+
+## Frontend Readiness and Tests
+
+The landing page's API indicator requests the same-origin `/api/readiness`
+route. That server-side route checks the Go API `/ready` endpoint with a
+two-second timeout and no-store caching; public responses expose only ready,
+unavailable or timeout state. The independent `/api/health` route remains a
+web liveness probe. Readiness is informational and is not an authorization
+check.
+
+From `apps/web`, run the deterministic UI and security helper tests with:
+
+```powershell
+cmd.exe /c npm run test:ci
+cmd.exe /c npm run test:security
+```
+
+The real authentication E2E suite is `npm run test:e2e`. It requires an
+explicitly disposable PostgreSQL test database, applied migrations, a fictional
+test identity and temporary HTTPS certificate. GitHub Actions provisions all
+of these independently for the browser job; it does not use or connect to a
+developer, staging or production database. Docker is used only by the hosted
+CI runner and is not a local development requirement.

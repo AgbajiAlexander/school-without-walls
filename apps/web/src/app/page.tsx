@@ -1,4 +1,5 @@
 import React from "react";
+import ApiReadiness from "@/components/api-readiness";
 
 export default function Home() {
   return (
@@ -15,10 +16,7 @@ export default function Home() {
             Configurable, multi-tenant digital school operating system and learning continuity platform.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse" aria-hidden="true"></span>
-          <span className="text-xs font-medium text-slate-700">API Gateway Ready</span>
-        </div>
+        <ApiReadiness />
       </header>
 
       <section className="grid grid-cols-1 md:grid-cols-2 gap-6 my-auto">
