@@ -162,6 +162,8 @@ func (h *Handler) VerifyInvitation(w http.ResponseWriter, r *http.Request) {
 	apphttp.JSON(w, r, http.StatusOK, map[string]any{
 		"invited_email": inv.InvitedEmail,
 		"expires_at":    inv.ExpiresAt,
+		"tenant_slug":   inv.TenantSlug,
+		"tenant_name":   inv.TenantName,
 	})
 }
 
@@ -184,12 +186,16 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		r.Context(), req.Token, req.FullName, req.Password, ip, r.UserAgent(), reqID,
 	)
 	if err != nil {
-		if errors.Is(err, ErrInvitationIdentityExists) {
-			apphttp.ErrorJSON(w, r, http.StatusConflict, apphttp.ErrCodeConflict, "Sign in to the existing account before accepting this invitation", nil)
-			return
-		}
 		if errors.Is(err, ErrInvitationNotFound) {
 			apphttp.ErrorJSON(w, r, http.StatusUnprocessableEntity, apphttp.ErrCodeInvalidInput, "Invitation token is invalid, expired, or already used", nil)
+			return
+		}
+		if errors.Is(err, ErrInvalidCredentials) {
+			apphttp.ErrorJSON(w, r, http.StatusUnauthorized, apphttp.ErrCodeUnauthenticated, "Invitation or account password is invalid", nil)
+			return
+		}
+		if errors.Is(err, ErrAccountSuspended) {
+			apphttp.ErrorJSON(w, r, http.StatusForbidden, apphttp.ErrCodeForbidden, "This account cannot accept invitations", nil)
 			return
 		}
 		if isPasswordPolicyError(err) {

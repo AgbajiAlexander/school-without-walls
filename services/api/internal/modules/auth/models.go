@@ -83,6 +83,8 @@ type Invitation struct {
 	TenantID     *uuid.UUID       `json:"tenant_id,omitempty"`
 	InvitedEmail string           `json:"invited_email"`
 	TargetRole   string           `json:"target_role"`
+	TenantSlug   string           `json:"tenant_slug,omitempty"`
+	TenantName   string           `json:"tenant_name,omitempty"`
 	TokenHash    string           `json:"-"`
 	Status       InvitationStatus `json:"status"`
 	ExpiresAt    time.Time        `json:"expires_at"`
@@ -102,6 +104,7 @@ type PasswordReset struct {
 
 type AuditEvent struct {
 	ID               uuid.UUID      `json:"id"`
+	TenantID         *uuid.UUID     `json:"tenant_id,omitempty"`
 	ActorID          *uuid.UUID     `json:"actor_id,omitempty"`
 	Action           string         `json:"action"`
 	SubjectType      string         `json:"subject_type"`
@@ -109,6 +112,15 @@ type AuditEvent struct {
 	RequestID        string         `json:"request_id"`
 	MetadataRedacted map[string]any `json:"metadata_redacted"`
 	CreatedAt        time.Time      `json:"created_at"`
+}
+
+type MembershipRecord struct {
+	ID        uuid.UUID
+	TenantID  uuid.UUID
+	UserID    uuid.UUID
+	Role      string
+	Status    string
+	CreatedAt time.Time
 }
 
 // Request and Response DTOs

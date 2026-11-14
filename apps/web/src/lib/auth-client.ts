@@ -25,6 +25,8 @@ export interface LoginResult {
 export interface InvitationDetails {
   invited_email: string;
   expires_at: string;
+  tenant_slug?: string;
+  tenant_name?: string;
 }
 
 interface ApiEnvelope<T> {

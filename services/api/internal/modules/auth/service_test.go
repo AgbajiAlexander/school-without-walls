@@ -83,6 +83,81 @@ func TestAuthServiceLogin(t *testing.T) {
 	}
 }
 
+func TestInvitationAcceptanceCreatesMembershipFromStoredInvitation(t *testing.T) {
+	repo := NewMockRepository()
+	service := NewService(repo)
+	tenantID := uuid.New()
+	rawToken, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateInvitation(context.Background(), &Invitation{
+		TenantID: &tenantID, InvitedEmail: "owner@school.invalid", TargetRole: "SCHOOL_OWNER",
+		TokenHash: HashToken(rawToken), Status: InvitationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := service.AcceptInvitation(context.Background(), rawToken, "Fictional Owner",
+		"a strong fictional test password", "127.0.0.1", "test-agent", "request"); err != nil {
+		t.Fatalf("accept tenant owner invitation: %v", err)
+	}
+	if len(repo.Memberships) != 1 {
+		t.Fatalf("expected exactly one membership, got %d", len(repo.Memberships))
+	}
+	membership := repo.Memberships[0]
+	if membership.TenantID != tenantID || membership.Role != "SCHOOL_OWNER" || membership.Status != "ACTIVE" {
+		t.Fatalf("membership must derive role and tenant from invitation: %+v", membership)
+	}
+	if len(repo.AuditEvents) == 0 || repo.AuditEvents[len(repo.AuditEvents)-1].TenantID == nil ||
+		*repo.AuditEvents[len(repo.AuditEvents)-1].TenantID != tenantID {
+		t.Fatal("tenant invitation acceptance should produce a tenant-scoped audit event")
+	}
+}
+
+func TestExistingAccountAcceptsTenantInvitationWithoutCredentialChanges(t *testing.T) {
+	repo := NewMockRepository()
+	service := NewService(repo)
+	ctx := context.Background()
+	password := "existing account passphrase for test"
+	passwordHash, err := HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingUser := &User{
+		ID: uuid.New(), Email: "existing-owner@school.invalid",
+		PasswordHash: passwordHash, FullName: "Fictional Existing Owner", Status: UserStatusActive,
+	}
+	if err := repo.CreateUser(ctx, existingUser); err != nil {
+		t.Fatal(err)
+	}
+	tenantID := uuid.New()
+	rawToken, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateInvitation(ctx, &Invitation{
+		TenantID: &tenantID, InvitedEmail: existingUser.Email, TargetRole: "SCHOOL_OWNER",
+		TokenHash: HashToken(rawToken), Status: InvitationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, err := service.AcceptInvitation(ctx, rawToken, "Ignored Proposed Name",
+		"incorrect account passphrase", "127.0.0.1", "test-agent", "bad-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("existing account password must be verified, got %v", err)
+	}
+	accepted, _, _, err := service.AcceptInvitation(ctx, rawToken, "Ignored Proposed Name",
+		password, "127.0.0.1", "test-agent", "valid-password")
+	if err != nil {
+		t.Fatalf("existing account owner should accept its invitation: %v", err)
+	}
+	if accepted.ID != existingUser.ID || accepted.FullName != "Fictional Existing Owner" || accepted.PasswordHash != passwordHash {
+		t.Fatal("invitation acceptance must preserve the existing global account identity and credentials")
+	}
+	if len(repo.Memberships) != 1 || repo.Memberships[0].TenantID != tenantID || repo.Memberships[0].Role != "SCHOOL_OWNER" {
+		t.Fatalf("expected membership from stored invitation, got %+v", repo.Memberships)
+	}
+}
+
 func TestExpiredSessionRejected(t *testing.T) {
 	repo := NewMockRepository()
 	service := NewService(repo)
@@ -328,7 +403,7 @@ func TestAuthServiceBootstrapAdmin(t *testing.T) {
 	}
 }
 
-func TestInvitationCannotReplaceExistingAccountCredentials(t *testing.T) {
+func TestInvitationRequiresExistingPasswordAndPreservesCredentials(t *testing.T) {
 	repo := NewMockRepository()
 	svc := NewService(repo)
 	ctx := context.Background()
@@ -357,17 +432,24 @@ func TestInvitationCannotReplaceExistingAccountCredentials(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	_, _, _, err = svc.AcceptInvitation(ctx, rawToken, "Changed Name", "new invitation passphrase", "", "", "req")
-	if !errors.Is(err, ErrInvitationIdentityExists) {
-		t.Fatalf("expected existing identity rejection, got %v", err)
+	_, _, _, err = svc.AcceptInvitation(ctx, rawToken, "Changed Name", "incorrect existing password", "", "", "wrong-password")
+	if !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("expected existing account password rejection, got %v", err)
+	}
+	accepted, _, _, err := svc.AcceptInvitation(ctx, rawToken, "Changed Name", oldPassword, "", "", "valid-password")
+	if err != nil {
+		t.Fatalf("existing account should accept invitation with its current password: %v", err)
+	}
+	if accepted.ID != existing.ID || accepted.FullName != "Existing User" || accepted.PasswordHash != passwordHash {
+		t.Fatal("invitation must preserve the existing user's identity and password hash")
 	}
 	loggedIn, _, _, err := svc.Login(ctx, existing.Email, oldPassword, "", "", "req-login")
 	if err != nil || loggedIn.ID != existing.ID {
 		t.Fatalf("existing password must remain usable, got user=%v err=%v", loggedIn, err)
 	}
 	verified, err := svc.VerifyInvitation(ctx, rawToken)
-	if err != nil || verified.Status != InvitationStatusPending {
-		t.Fatalf("invitation must remain pending, got invitation=%v err=%v", verified, err)
+	if !errors.Is(err, ErrInvitationNotFound) || verified != nil {
+		t.Fatalf("accepted invitation must not be reusable, got invitation=%v err=%v", verified, err)
 	}
 }
 

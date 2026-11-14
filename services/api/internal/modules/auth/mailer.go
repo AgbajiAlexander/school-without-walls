@@ -37,14 +37,6 @@ func NewSMTPMailer(host string, port int, username, password, from, publicWebURL
 }
 
 func (m *SMTPMailer) SendPasswordReset(ctx context.Context, email, token string, expiresAt time.Time) error {
-	to, err := mail.ParseAddress(email)
-	if err != nil || to.Address != email {
-		return fmt.Errorf("invalid password-reset recipient")
-	}
-	from, err := mail.ParseAddress(m.from)
-	if err != nil {
-		return fmt.Errorf("invalid configured SMTP sender")
-	}
 	resetURL, err := url.Parse(m.publicWebURL + "/reset-password")
 	if err != nil {
 		return fmt.Errorf("invalid public web URL")
@@ -53,15 +45,34 @@ func (m *SMTPMailer) SendPasswordReset(ctx context.Context, email, token string,
 	query.Set("token", token)
 	resetURL.RawQuery = query.Encode()
 
+	return m.send(ctx, email, "Reset your School Without Walls password",
+		"Use this one-time link to reset your password:\r\n"+resetURL.String()+
+			"\r\n\r\nThis link expires at "+expiresAt.UTC().Format(time.RFC3339)+
+			". If you did not request this, you can ignore this message.\r\n")
+}
+
+func (m *SMTPMailer) SendInvitation(ctx context.Context, email, token, tenantName string, expiresAt time.Time) error {
+	invitationURL := m.publicWebURL + "/invite/" + url.PathEscape(token)
+	body := "You were invited to set up " + tenantName + " as its school owner.\r\n\r\n" +
+		"Accept invitation: " + invitationURL + "\r\n\r\n" +
+		"This one-time link expires at " + expiresAt.UTC().Format(time.RFC3339) + ".\r\n"
+	return m.send(ctx, email, "Activate your School Without Walls school owner account", body)
+}
+
+func (m *SMTPMailer) send(ctx context.Context, email, subject, body string) error {
+	to, err := mail.ParseAddress(email)
+	if err != nil || to.Address != email {
+		return fmt.Errorf("invalid email recipient")
+	}
+	from, err := mail.ParseAddress(m.from)
+	if err != nil {
+		return fmt.Errorf("invalid configured SMTP sender")
+	}
 	message := "From: " + from.String() + "\r\n" +
 		"To: " + to.String() + "\r\n" +
-		"Subject: Reset your School Without Walls password\r\n" +
+		"Subject: " + subject + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
-		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" +
-		"Use this one-time link to reset your password:\r\n" + resetURL.String() +
-		"\r\n\r\nThis link expires at " + expiresAt.UTC().Format(time.RFC3339) +
-		". If you did not request this, you can ignore this message.\r\n"
-
+		"Content-Type: text/plain; charset=UTF-8\r\n\r\n" + body
 	dialer := net.Dialer{Timeout: 10 * time.Second}
 	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(m.host, fmt.Sprint(m.port)))
 	if err != nil {

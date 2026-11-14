@@ -238,9 +238,9 @@ func (s *Service) AcceptInvitation(ctx context.Context, rawToken, fullName, pass
 		RequestID:        requestID,
 		MetadataRedacted: map[string]any{},
 	}
-	acceptedUser, err := s.repo.AcceptInvitation(ctx, HashToken(rawToken), user, session, event)
+	acceptedUser, err := s.repo.AcceptInvitation(ctx, HashToken(rawToken), user, password, session, event)
 	if err != nil {
-		if errors.Is(err, ErrInvitationNotFound) || errors.Is(err, ErrInvitationIdentityExists) {
+		if errors.Is(err, ErrInvitationNotFound) {
 			return nil, "", "", err
 		}
 		return nil, "", "", fmt.Errorf("failed to accept invitation: %w", err)

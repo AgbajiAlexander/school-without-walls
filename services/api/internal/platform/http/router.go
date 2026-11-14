@@ -8,15 +8,17 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/auth"
+	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
 	"github.com/school-without-walls/api/internal/platform/middleware"
 )
 
 // RouterConfig holds dependencies for building the HTTP router.
 type RouterConfig struct {
-	Config   *config.Config
-	DB       db.Pinger
-	AuthRepo auth.Repository
+	Config     *config.Config
+	DB         db.Pinger
+	AuthRepo   auth.Repository
+	TenantRepo tenants.Repository
 }
 
 // NewRouter constructs the Chi HTTP router with standard middleware and routes.
@@ -39,15 +41,32 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	var allowedOrigins []string
 	var trustedProxyNets []*net.IPNet
 	var mailer auth.Mailer
+	var invitationMailer tenants.InvitationMailer
+	var captureMailer *tenants.CaptureMailer
+	tenantRepo := cfg.TenantRepo
+	if tenantRepo == nil {
+		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
+			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+		} else {
+			tenantRepo = tenants.NewMockRepository()
+		}
+	}
 	if cfg.Config != nil {
 		allowedOrigins = cfg.Config.CORSAllowedOrigins
 		trustedProxyNets = cfg.Config.TrustedProxyNets
 		if cfg.Config.SMTPHost != "" {
-			mailer = auth.NewSMTPMailer(cfg.Config.SMTPHost, cfg.Config.SMTPPort,
+			smtpMailer := auth.NewSMTPMailer(cfg.Config.SMTPHost, cfg.Config.SMTPPort,
 				cfg.Config.SMTPUsername, cfg.Config.SMTPPassword, cfg.Config.SMTPFrom, cfg.Config.PublicWebURL)
+			mailer = smtpMailer
+			invitationMailer = smtpMailer
+		} else if cfg.Config.Environment == "development" || cfg.Config.Environment == "test" {
+			captureMailer = tenants.NewCaptureMailer(cfg.Config.PublicWebURL)
+			invitationMailer = captureMailer
 		}
 	}
 	authH = auth.NewHandler(authSvc, isSecure, mailer, trustedProxyNets)
+	tenantSvc := tenants.NewService(tenantRepo, invitationMailer)
+	tenantH := tenants.NewHandler(tenantSvc, captureMailer)
 
 	// Base middleware stack
 	r.Use(middleware.Recoverer)
@@ -108,6 +127,26 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		v1.Route("/invitations", func(inv chi.Router) {
 			inv.Get("/{token}/verify", authH.VerifyInvitation)
 			inv.Post("/accept", authH.AcceptInvitation)
+		})
+
+		v1.Route("/platform", func(platform chi.Router) {
+			platform.Group(func(protected chi.Router) {
+				protected.Use(auth.RequireAuth)
+				protected.Get("/tenants", tenantH.List)
+				if captureMailer != nil {
+					protected.Get("/mail-capture", tenantH.CapturedMail)
+				}
+				protected.Group(func(write chi.Router) {
+					write.Use(auth.RequireCSRF(authSvc))
+					write.Post("/tenants", tenantH.Provision)
+				})
+			})
+		})
+
+		v1.Group(func(protected chi.Router) {
+			protected.Use(auth.RequireAuth)
+			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
+			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
 		})
 	})
 

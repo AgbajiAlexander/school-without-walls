@@ -14,11 +14,19 @@ Status: Proposed ADR baseline (13 November 2026). The PRD is the source for beha
 ## Global authentication boundary
 
 - `users` is a global identity table; authentication does not assign school roles. `platform_admins` is an explicit global operator grant, not a school membership. Tenant memberships and school-specific RBAC are introduced in SWW-003.
-- Migrations `000002_auth_identity` and `000003_auth_hardening` hold identities, sessions, invitations, password-reset tokens, audit events, platform-admin grants and shared rate-limit state. Invitation, reset and session tokens are stored as hashes; lifecycle operations that consume tokens, revoke sessions and write audit events use transactions.
+- Migrations `000002_auth_identity`, `000003_auth_hardening` and `000004_tenants` hold identities, sessions, invitations, password-reset tokens, audit events, platform-admin grants, shared rate-limit state, tenants, settings and memberships. Invitation, reset and session tokens are stored as hashes; lifecycle operations that consume tokens, revoke sessions and write audit events use transactions.
 - `/api/v1/auth` exposes `POST /login`, `POST /forgot-password`, `POST /reset-password`, `GET /me`, `POST /logout`, `GET /sessions` and `DELETE /sessions/{id}`. Invitation endpoints are `GET /api/v1/invitations/{token}/verify` and `POST /api/v1/invitations/accept`. The browser never supplies an authoritative role.
 - Browser sessions use HttpOnly `SameSite=Lax` cookies; production and staging use `Secure` `__Host-` cookies. Unsafe authenticated requests also require a CSRF header matching the session-bound CSRF cookie/hash. Mutating requests are checked against configured origins and rejected when Fetch Metadata identifies a cross-site request. Forwarded client IPs are trusted only from configured proxy CIDRs.
 - Authentication rate limits use PostgreSQL so all API instances share counters. Reset email delivery requires configured SMTP with STARTTLS; without SMTP, the reset-request flow is unavailable rather than returning an undelivered success.
 - The bootstrap command creates only the first global platform administrator and runs only when `SERVER_ENV=development` and `SWW_ENABLE_DEV_BOOTSTRAP=true`; it requires explicit email, name and password inputs. Never use this path in staging or production.
+
+## Tenant provisioning and school settings (SWW-003)
+
+- `GET/POST /api/v1/platform/tenants` require a verified session and a database-backed `platform_admins` grant. The create request accepts school identity, locale, time zone and the initial owner's email; it cannot select a role, status, tenant ID or membership.
+- Provisioning writes the tenant, hashed one-time `SCHOOL_OWNER` invitation and audit event in one PostgreSQL transaction. SMTP must be configured outside development/test. Development and test may use the authenticated, in-memory `/api/v1/platform/mail-capture` endpoint; it is not registered in staging or production.
+- Owner invitation acceptance uses the role and tenant stored with the invitation token. New accounts are activated; an existing account must prove its current password, which is not changed. In that same transaction it creates the active membership, activates the pending tenant, creates the user session and records the tenant-scoped audit event.
+- `GET /api/v1/tenants/{slug}/settings` requires an active membership. `PATCH` additionally requires the server-stored `SCHOOL_OWNER` or `SCHOOL_ADMIN` membership and CSRF validation. The slug only selects a candidate record; it never grants tenant authority. Platform admins do not implicitly gain school membership.
+- Tenant settings include locale, time zone, limited branding and configured education stages. Feature flags, roles and membership identifiers are not editable through the school settings API. Nigerian curriculum stages are the defaults; British enrichment is explicitly optional.
 
 ## Tenant request flow
 

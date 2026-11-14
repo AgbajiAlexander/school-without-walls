@@ -61,6 +61,7 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 		"000001_initial_schema.up.sql",
 		"000002_auth_identity.up.sql",
 		"000003_auth_hardening.up.sql",
+		"000004_tenants.up.sql",
 	} {
 		applyMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", name))
 	}
@@ -152,6 +153,81 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 		t.Fatalf("raw invitation token must not be stored, count=%d err=%v", rawTokenCount, err)
 	}
 
+	tenantID := uuid.New()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO tenants (id, slug, name, status, locale, timezone)
+		VALUES ($1, 'integration-school', 'Integration School', 'PENDING_SETUP', 'en-NG', 'Africa/Lagos')
+	`, tenantID); err != nil {
+		t.Fatalf("create tenant for invitation integration test: %v", err)
+	}
+	rawOwnerInvite, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateInvitation(ctx, &Invitation{
+		TenantID: &tenantID, InvitedEmail: "owner@school.invalid", TargetRole: "SCHOOL_OWNER",
+		TokenHash: HashToken(rawOwnerInvite), Status: InvitationStatusPending,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create tenant owner invitation: %v", err)
+	}
+	ownerInvitation, err := repo.GetInvitationByTokenHash(ctx, HashToken(rawOwnerInvite))
+	if err != nil || ownerInvitation.TenantSlug != "integration-school" || ownerInvitation.TenantName != "Integration School" {
+		t.Fatalf("tenant invitation verification should return the tenant identity, invitation=%+v err=%v", ownerInvitation, err)
+	}
+	owner, _, _, err := service.AcceptInvitation(ctx, rawOwnerInvite, "Fictional School Owner",
+		"a separate fictional owner test passphrase", "127.0.0.1", "integration-test", "owner-invite-test")
+	if err != nil {
+		t.Fatalf("accept tenant owner invitation: %v", err)
+	}
+	var ownerRole, tenantStatus string
+	if err := pool.QueryRow(ctx, `
+		SELECT m.role, t.status::text
+		FROM memberships m JOIN tenants t ON t.id = m.tenant_id
+		WHERE m.user_id = $1 AND t.id = $2
+	`, owner.ID, tenantID).Scan(&ownerRole, &tenantStatus); err != nil {
+		t.Fatalf("verify tenant owner membership: %v", err)
+	}
+	if ownerRole != "SCHOOL_OWNER" || tenantStatus != "ACTIVE" {
+		t.Fatalf("expected owner membership to activate tenant, role=%s status=%s", ownerRole, tenantStatus)
+	}
+	existingPassword := "fictional existing account passphrase"
+	existingPasswordHash, err := HashPassword(existingPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	existingAccount := &User{
+		ID: uuid.New(), Email: "existing-admin@school.invalid",
+		PasswordHash: existingPasswordHash, FullName: "Fictional Existing Admin", Status: UserStatusActive,
+	}
+	if err := repo.CreateUser(ctx, existingAccount); err != nil {
+		t.Fatalf("create existing tenant administrator: %v", err)
+	}
+	rawExistingInvite, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateInvitation(ctx, &Invitation{
+		TenantID: &tenantID, InvitedEmail: existingAccount.Email, TargetRole: "SCHOOL_ADMIN",
+		TokenHash: HashToken(rawExistingInvite), Status: InvitationStatusPending,
+		ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatalf("create invitation for existing account: %v", err)
+	}
+	if _, _, _, err := service.AcceptInvitation(ctx, rawExistingInvite, "Ignored Proposed Name",
+		"wrong existing account password", "127.0.0.1", "integration-test", "wrong-existing-password"); !errors.Is(err, ErrInvalidCredentials) {
+		t.Fatalf("existing account invitation must reject wrong password: %v", err)
+	}
+	acceptedExisting, _, _, err := service.AcceptInvitation(ctx, rawExistingInvite, "Ignored Proposed Name",
+		existingPassword, "127.0.0.1", "integration-test", "existing-account-accept")
+	if err != nil {
+		t.Fatalf("existing active account should accept invitation: %v", err)
+	}
+	if acceptedExisting.ID != existingAccount.ID || acceptedExisting.FullName != existingAccount.FullName ||
+		acceptedExisting.PasswordHash != existingPasswordHash {
+		t.Fatal("existing account invitation acceptance must preserve global identity credentials")
+	}
+
 	token, err := service.RequestPasswordReset(ctx, "invitee@school.invalid", "reset-test")
 	if err != nil || token == "" {
 		t.Fatalf("expected reset token for active test account, token=%q err=%v", token, err)
@@ -178,6 +254,7 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 		t.Fatalf("second rate-limit attempt should be blocked, retry=%s err=%v", retry, err)
 	}
 
+	applyMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", "000004_tenants.down.sql"))
 	applyMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", "000003_auth_hardening.down.sql"))
 }
 

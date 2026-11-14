@@ -66,7 +66,9 @@ export default function AcceptInvitationPage({ params }: PageProps) {
 
     try {
       await acceptInvitation(token, fullName, password);
-      router.push("/dashboard");
+      router.push(invitation?.tenant_slug
+        ? `/schools/${encodeURIComponent(invitation.tenant_slug)}/settings`
+        : "/dashboard");
     } catch (err: unknown) {
       if (err instanceof Error) {
         setError(err.message);
@@ -123,6 +125,11 @@ export default function AcceptInvitationPage({ params }: PageProps) {
         <p className="mt-1 text-sm text-slate-600">
           Complete account activation for <span className="font-semibold text-slate-800">{invitation.invited_email}</span>
         </p>
+        {invitation.tenant_name && (
+          <p className="mt-2 text-sm text-slate-600">
+            You are joining <span className="font-semibold text-slate-800">{invitation.tenant_name}</span> as its school owner.
+          </p>
+        )}
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md px-4">
@@ -163,7 +170,7 @@ export default function AcceptInvitationPage({ params }: PageProps) {
             <div>
               <div className="flex items-center justify-between">
                 <label htmlFor="password" className="block text-sm font-medium text-slate-700">
-                  Create Password
+                  Create or confirm password
                 </label>
                 <button
                   type="button"
@@ -181,6 +188,9 @@ export default function AcceptInvitationPage({ params }: PageProps) {
                 onChange={(e) => setPassword(e.target.value)}
                 className="mt-1 block w-full px-3 py-2 border border-slate-300 rounded-lg shadow-sm placeholder-slate-400 focus:outline-none focus:ring-green-500 focus:border-green-500 sm:text-sm text-slate-900"
               />
+              <p className="mt-1 text-xs text-slate-500">
+                If you already have an account for this email, use its existing password. Your existing account credentials will not change.
+              </p>
             </div>
 
             <div>
@@ -218,7 +228,7 @@ export default function AcceptInvitationPage({ params }: PageProps) {
               disabled={submitting || !isFormValid}
               className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? "Activating account..." : "Activate Account & Sign In"}
+              {submitting ? "Accepting invitation..." : "Accept Invitation & Sign In"}
             </button>
           </form>
         </div>

@@ -19,6 +19,7 @@ type MockRepository struct {
 	PasswordResets map[string]*PasswordReset // key: tokenHash
 	AuditEvents    []*AuditEvent
 	PlatformAdmins map[uuid.UUID]bool
+	Memberships    []MembershipRecord
 	rateLimiter    *RateLimiter
 }
 
@@ -31,6 +32,7 @@ func NewMockRepository() *MockRepository {
 		PasswordResets: make(map[string]*PasswordReset),
 		AuditEvents:    make([]*AuditEvent, 0),
 		PlatformAdmins: make(map[uuid.UUID]bool),
+		Memberships:    make([]MembershipRecord, 0),
 		rateLimiter:    NewRateLimiter(5, 5*time.Minute),
 	}
 }
@@ -274,7 +276,7 @@ func (m *MockRepository) MarkInvitationUsed(ctx context.Context, id uuid.UUID) e
 	return ErrInvitationNotFound
 }
 
-func (m *MockRepository) AcceptInvitation(ctx context.Context, tokenHash string, invitedUser *User, session *Session, event *AuditEvent) (*User, error) {
+func (m *MockRepository) AcceptInvitation(ctx context.Context, tokenHash string, invitedUser *User, password string, session *Session, event *AuditEvent) (*User, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	invitation, exists := m.Invitations[tokenHash]
@@ -283,18 +285,30 @@ func (m *MockRepository) AcceptInvitation(ctx context.Context, tokenHash string,
 	}
 	key := strings.ToLower(strings.TrimSpace(invitation.InvitedEmail))
 	user, exists := m.UsersByEmail[key]
-	if exists && user.Status != UserStatusPendingActivation {
-		return nil, ErrInvitationIdentityExists
+	if exists {
+		switch user.Status {
+		case UserStatusActive:
+			matches, err := VerifyPassword(password, user.PasswordHash)
+			if err != nil {
+				return nil, err
+			}
+			if !matches {
+				return nil, ErrInvalidCredentials
+			}
+		case UserStatusPendingActivation:
+		default:
+			return nil, ErrAccountSuspended
+		}
 	}
 
 	now := time.Now().UTC()
-	if exists {
+	if exists && user.Status == UserStatusPendingActivation {
 		user.FullName = invitedUser.FullName
 		user.PasswordHash = invitedUser.PasswordHash
 		user.Status = UserStatusActive
 		user.VerifiedAt = &now
 		user.UpdatedAt = now
-	} else {
+	} else if !exists {
 		user = invitedUser
 		user.Email = invitation.InvitedEmail
 		if user.ID == uuid.Nil {
@@ -310,6 +324,13 @@ func (m *MockRepository) AcceptInvitation(ctx context.Context, tokenHash string,
 	invitation.UsedAt = &now
 	session.UserID = user.ID
 	m.addSessionLocked(session)
+	if invitation.TenantID != nil {
+		m.Memberships = append(m.Memberships, MembershipRecord{
+			ID: uuid.New(), TenantID: *invitation.TenantID, UserID: user.ID,
+			Role: invitation.TargetRole, Status: "ACTIVE", CreatedAt: now,
+		})
+		event.TenantID = invitation.TenantID
+	}
 	event.ActorID = &user.ID
 	event.SubjectType = "invitation"
 	event.SubjectID = invitation.ID.String()

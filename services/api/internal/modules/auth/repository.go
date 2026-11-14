@@ -15,12 +15,11 @@ import (
 )
 
 var (
-	ErrUserNotFound             = errors.New("user not found")
-	ErrSessionNotFound          = errors.New("session not found or expired")
-	ErrInvitationNotFound       = errors.New("invitation not found, expired, or already used")
-	ErrPasswordResetNotFound    = errors.New("password reset token not found, expired, or already used")
-	ErrDuplicateEmail           = errors.New("email already in use")
-	ErrInvitationIdentityExists = errors.New("invitation cannot change an existing account's credentials")
+	ErrUserNotFound          = errors.New("user not found")
+	ErrSessionNotFound       = errors.New("session not found or expired")
+	ErrInvitationNotFound    = errors.New("invitation not found, expired, or already used")
+	ErrPasswordResetNotFound = errors.New("password reset token not found, expired, or already used")
+	ErrDuplicateEmail        = errors.New("email already in use")
 )
 
 type Repository interface {
@@ -44,7 +43,7 @@ type Repository interface {
 	CreateInvitation(ctx context.Context, inv *Invitation) error
 	GetInvitationByTokenHash(ctx context.Context, tokenHash string) (*Invitation, error)
 	MarkInvitationUsed(ctx context.Context, id uuid.UUID) error
-	AcceptInvitation(ctx context.Context, tokenHash string, user *User, session *Session, event *AuditEvent) (*User, error)
+	AcceptInvitation(ctx context.Context, tokenHash string, user *User, password string, session *Session, event *AuditEvent) (*User, error)
 
 	CreatePasswordReset(ctx context.Context, reset *PasswordReset) error
 	CreatePasswordResetWithAudit(ctx context.Context, reset *PasswordReset, event *AuditEvent) error
@@ -386,19 +385,29 @@ func (r *pgRepository) CreateInvitation(ctx context.Context, inv *Invitation) er
 
 func (r *pgRepository) GetInvitationByTokenHash(ctx context.Context, tokenHash string) (*Invitation, error) {
 	query := `
-		SELECT id, tenant_id, invited_email, target_role, token_hash, status, expires_at, used_at, created_by, created_at
-		FROM invitations
-		WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP;
+		SELECT i.id, i.tenant_id, i.invited_email, i.target_role, i.token_hash, i.status,
+			i.expires_at, i.used_at, i.created_by, i.created_at, t.slug::text, t.name
+		FROM invitations i
+		LEFT JOIN tenants t ON t.id = i.tenant_id
+		WHERE i.token_hash = $1 AND i.status = 'PENDING' AND i.expires_at > CURRENT_TIMESTAMP;
 	`
 	var inv Invitation
+	var tenantSlug, tenantName *string
 	err := r.pool.QueryRow(ctx, query, tokenHash).Scan(
-		&inv.ID, &inv.TenantID, &inv.InvitedEmail, &inv.TargetRole, &inv.TokenHash, &inv.Status, &inv.ExpiresAt, &inv.UsedAt, &inv.CreatedBy, &inv.CreatedAt,
+		&inv.ID, &inv.TenantID, &inv.InvitedEmail, &inv.TargetRole, &inv.TokenHash, &inv.Status,
+		&inv.ExpiresAt, &inv.UsedAt, &inv.CreatedBy, &inv.CreatedAt, &tenantSlug, &tenantName,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrInvitationNotFound
 		}
 		return nil, fmt.Errorf("failed to query invitation: %w", err)
+	}
+	if tenantSlug != nil {
+		inv.TenantSlug = *tenantSlug
+	}
+	if tenantName != nil {
+		inv.TenantName = *tenantName
 	}
 	return &inv, nil
 }
@@ -419,7 +428,7 @@ func (r *pgRepository) MarkInvitationUsed(ctx context.Context, id uuid.UUID) err
 	return nil
 }
 
-func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, invitedUser *User, session *Session, event *AuditEvent) (*User, error) {
+func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, invitedUser *User, password string, session *Session, event *AuditEvent) (*User, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin invitation acceptance: %w", err)
@@ -428,11 +437,11 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 
 	var invitation Invitation
 	err = tx.QueryRow(ctx, `
-		SELECT id, invited_email, status, expires_at
+		SELECT id, tenant_id, invited_email, target_role, status, expires_at
 		FROM invitations
 		WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP
 		FOR UPDATE
-	`, tokenHash).Scan(&invitation.ID, &invitation.InvitedEmail, &invitation.Status, &invitation.ExpiresAt)
+	`, tokenHash).Scan(&invitation.ID, &invitation.TenantID, &invitation.InvitedEmail, &invitation.TargetRole, &invitation.Status, &invitation.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrInvitationNotFound
 	}
@@ -452,19 +461,29 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 	)
 	switch {
 	case err == nil:
-		if user.Status != UserStatusPendingActivation {
-			return nil, ErrInvitationIdentityExists
-		}
-		user.FullName = invitedUser.FullName
-		user.PasswordHash = invitedUser.PasswordHash
-		user.Status = UserStatusActive
-		now := time.Now().UTC()
-		user.VerifiedAt = &now
-		if _, err := tx.Exec(ctx, `
-			UPDATE users SET password_hash = $1, full_name = $2, status = $3,
-				verified_at = $4, updated_at = $4 WHERE id = $5
-		`, user.PasswordHash, user.FullName, user.Status, now, user.ID); err != nil {
-			return nil, fmt.Errorf("failed to activate invited user: %w", err)
+		switch user.Status {
+		case UserStatusActive:
+			matches, err := VerifyPassword(password, user.PasswordHash)
+			if err != nil {
+				return nil, fmt.Errorf("verify existing invited account: %w", err)
+			}
+			if !matches {
+				return nil, ErrInvalidCredentials
+			}
+		case UserStatusPendingActivation:
+			user.FullName = invitedUser.FullName
+			user.PasswordHash = invitedUser.PasswordHash
+			user.Status = UserStatusActive
+			now := time.Now().UTC()
+			user.VerifiedAt = &now
+			if _, err := tx.Exec(ctx, `
+				UPDATE users SET password_hash = $1, full_name = $2, status = $3,
+					verified_at = $4, updated_at = $4 WHERE id = $5
+			`, user.PasswordHash, user.FullName, user.Status, now, user.ID); err != nil {
+				return nil, fmt.Errorf("failed to activate invited user: %w", err)
+			}
+		default:
+			return nil, ErrAccountSuspended
 		}
 	case errors.Is(err, pgx.ErrNoRows):
 		user = *invitedUser
@@ -485,6 +504,23 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 		return nil, fmt.Errorf("failed to find invited user: %w", err)
 	}
 	session.UserID = user.ID
+	if invitation.TenantID != nil {
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO memberships (id, tenant_id, user_id, role, status, created_at)
+			VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_TIMESTAMP)
+		`, uuid.New(), invitation.TenantID, user.ID, invitation.TargetRole); err != nil {
+			return nil, fmt.Errorf("failed to create invited tenant membership: %w", err)
+		}
+		event.TenantID = invitation.TenantID
+		if invitation.TargetRole == "SCHOOL_OWNER" {
+			if _, err := tx.Exec(ctx, `
+				UPDATE tenants SET status = 'ACTIVE', updated_at = CURRENT_TIMESTAMP
+				WHERE id = $1 AND status = 'PENDING_SETUP'
+			`, invitation.TenantID); err != nil {
+				return nil, fmt.Errorf("activate owner-provisioned tenant: %w", err)
+			}
+		}
+	}
 
 	if _, err := tx.Exec(ctx, `
 		UPDATE invitations SET status = 'ACCEPTED', used_at = CURRENT_TIMESTAMP
@@ -725,15 +761,15 @@ func (r *pgRepository) RecordAuditEvent(ctx context.Context, event *AuditEvent) 
 
 	metaJSON, err := json.Marshal(event.MetadataRedacted)
 	if err != nil {
-		metaJSON = []byte("{}")
+		return fmt.Errorf("failed to encode audit metadata: %w", err)
 	}
 
 	query := `
-		INSERT INTO audit_events (id, actor_id, action, subject_type, subject_id, request_id, metadata_redacted, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+		INSERT INTO audit_events (id, tenant_id, actor_id, action, subject_type, subject_id, request_id, metadata_redacted, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 	`
 	_, err = r.pool.Exec(ctx, query,
-		event.ID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metaJSON, event.CreatedAt,
+		event.ID, event.TenantID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metaJSON, event.CreatedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("failed to record audit event: %w", err)
@@ -771,9 +807,9 @@ func insertAuditEvent(ctx context.Context, tx authTx, event *AuditEvent) error {
 		return fmt.Errorf("failed to encode audit metadata: %w", err)
 	}
 	_, err = tx.Exec(ctx, `
-		INSERT INTO audit_events (id, actor_id, action, subject_type, subject_id, request_id, metadata_redacted, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-	`, event.ID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metaJSON, event.CreatedAt)
+		INSERT INTO audit_events (id, tenant_id, actor_id, action, subject_type, subject_id, request_id, metadata_redacted, created_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`, event.ID, event.TenantID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metaJSON, event.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("failed to record audit event: %w", err)
 	}
