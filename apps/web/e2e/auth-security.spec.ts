@@ -80,7 +80,7 @@ test("real backend rejects invalid credentials", async ({ page }) => {
   const credentials = getAdminCredentials();
   await page.goto("/login");
   await page.getByLabel("Email Address").fill(credentials.adminEmail);
-  await page.getByLabel("Password").fill(`${credentials.adminPassword}-incorrect`);
+  await page.getByLabel("Password", { exact: true }).fill(`${credentials.adminPassword}-incorrect`);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page.getByRole("alert")).toContainText("Invalid email or password");
@@ -114,7 +114,7 @@ test("real login, CSP, secure cookies, CSRF, client navigation, and logout work 
   await collectCspViolations(page, cspViolations);
 
   await page.getByLabel("Email Address").fill(credentials.adminEmail);
-  await page.getByLabel("Password").fill(credentials.adminPassword);
+  await page.getByLabel("Password", { exact: true }).fill(credentials.adminPassword);
   await page.getByRole("button", { name: "Sign in" }).click();
 
   await expect(page).toHaveURL(/\/dashboard$/);
