@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestPostgresTenantIsolationAndSettings(t *testing.T) {
-	databaseURL := os.Getenv("SWW_TEST_DATABASE_URL")
+	databaseURL := requireTenantIntegrationDatabaseURL(t)
 	if databaseURL == "" {
 		t.Skip("set SWW_TEST_DATABASE_URL to an isolated PostgreSQL database to run tenant integration tests")
 	}
@@ -23,15 +24,12 @@ func TestPostgresTenantIsolationAndSettings(t *testing.T) {
 	defer cancel()
 	adminPool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		t.Fatalf("connect to isolated test database: %v", err)
+		t.Fatal("could not connect to isolated PostgreSQL test database")
 	}
 	defer adminPool.Close()
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.ToLower(config.ConnConfig.Database), "test") {
-		t.Skip("refusing to create a tenant integration schema outside a database whose name contains 'test'")
+		t.Fatal("SWW_TEST_DATABASE_URL is not a valid PostgreSQL URI")
 	}
 	if _, err := adminPool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS citext`); err != nil {
 		t.Fatalf("enable citext in isolated test database: %v", err)
@@ -79,6 +77,7 @@ func TestPostgresTenantIsolationAndSettings(t *testing.T) {
 			t.Fatalf("insert fictional user: %v", err)
 		}
 	}
+
 	if _, err := pool.Exec(ctx, `INSERT INTO platform_admins (user_id) VALUES ($1)`, adminID); err != nil {
 		t.Fatalf("grant test platform administrator: %v", err)
 	}
@@ -159,6 +158,29 @@ func TestPostgresTenantIsolationAndSettings(t *testing.T) {
 	}); !errors.Is(err, ErrConflict) {
 		t.Fatalf("duplicate slug should be rejected, got %v", err)
 	}
+}
+
+func requireTenantIntegrationDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL := strings.TrimSpace(os.Getenv("SWW_TEST_DATABASE_URL"))
+	if databaseURL == "" {
+		if os.Getenv("SWW_REQUIRE_POSTGRES_TESTS") == "1" {
+			t.Fatal("SWW_TEST_DATABASE_URL is required when PostgreSQL integration tests are mandatory")
+		}
+		return ""
+	}
+
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal("SWW_TEST_DATABASE_URL is not a valid PostgreSQL URI")
+	}
+	databaseName := strings.ToLower(config.ConnConfig.Database)
+	testSegment := regexp.MustCompile(`(^|[^a-z0-9])test([^a-z0-9]|$)`)
+	unsafeSegment := regexp.MustCompile(`(^|[^a-z0-9])(dev|prod|production)([^a-z0-9]|$)`)
+	if !testSegment.MatchString(databaseName) || unsafeSegment.MatchString(databaseName) {
+		t.Fatal("tenant integration tests require a test-only database name")
+	}
+	return databaseURL
 }
 
 func applyTenantMigrationForTest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, path string) {

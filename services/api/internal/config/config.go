@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Config holds all backend runtime configuration.
@@ -30,7 +32,8 @@ type Config struct {
 	ShutdownTimeout    time.Duration
 }
 
-// Load loads configuration from environment variables with sensible defaults.
+// Load loads configuration from environment variables with defaults for
+// non-secret settings. The authoritative database URL must be explicit.
 func Load() (*Config, error) {
 	portStr := getEnv("SERVER_PORT", "8080")
 	port, err := strconv.Atoi(portStr)
@@ -43,7 +46,18 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("invalid SERVER_ENV: %s", env)
 	}
 
-	dbURL := getEnv("DATABASE_URL", "postgres://sww_user:sww_password@localhost:5432/sww_dev?sslmode=disable")
+	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	if dbURL == "" {
+		return nil, fmt.Errorf("DATABASE_URL is required")
+	}
+	databaseURL, err := url.Parse(dbURL)
+	if err != nil || (databaseURL.Scheme != "postgres" && databaseURL.Scheme != "postgresql") ||
+		databaseURL.Hostname() == "" || strings.Trim(databaseURL.Path, "/") == "" {
+		return nil, fmt.Errorf("DATABASE_URL must be a valid PostgreSQL connection URI")
+	}
+	if _, err := pgxpool.ParseConfig(dbURL); err != nil {
+		return nil, fmt.Errorf("DATABASE_URL must be a valid PostgreSQL connection URI")
+	}
 
 	maxConnsStr := getEnv("DATABASE_MAX_CONNS", "25")
 	maxConns, err := strconv.Atoi(maxConnsStr)
@@ -59,8 +73,8 @@ func Load() (*Config, error) {
 
 	corsOriginsStr := getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:3000")
 	var origins []string
-	for _, o := range strings.Split(corsOriginsStr, ",") {
-		trimmed := strings.TrimSpace(o)
+	for _, origin := range strings.Split(corsOriginsStr, ",") {
+		trimmed := strings.TrimSpace(origin)
 		if trimmed != "" {
 			if trimmed == "*" {
 				return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS must not contain wildcard origins when credentials are enabled")
@@ -68,6 +82,7 @@ func Load() (*Config, error) {
 			origins = append(origins, trimmed)
 		}
 	}
+
 	trustedProxies := splitList(getEnv("TRUSTED_PROXY_CIDRS", ""))
 	trustedProxyNets := make([]*net.IPNet, 0, len(trustedProxies))
 	for _, cidr := range trustedProxies {
@@ -77,11 +92,13 @@ func Load() (*Config, error) {
 		}
 		trustedProxyNets = append(trustedProxyNets, network)
 	}
+
 	publicWebURL := strings.TrimRight(getEnv("PUBLIC_WEB_URL", "http://localhost:3000"), "/")
 	webURL, err := url.ParseRequestURI(publicWebURL)
 	if err != nil || webURL.Host == "" || (webURL.Scheme != "https" && !(env == "development" && webURL.Scheme == "http")) {
 		return nil, fmt.Errorf("invalid PUBLIC_WEB_URL for environment %s", env)
 	}
+
 	smtpPort, err := strconv.Atoi(getEnv("SMTP_PORT", "587"))
 	if err != nil || smtpPort <= 0 || smtpPort > 65535 {
 		return nil, fmt.Errorf("invalid SMTP_PORT: %s", getEnv("SMTP_PORT", "587"))

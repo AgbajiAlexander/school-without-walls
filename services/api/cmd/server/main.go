@@ -30,26 +30,16 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Initialize database connection pool
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	dbPool, err := db.Connect(ctx, db.Config{
-		URL:      cfg.DatabaseURL,
-		MaxConns: cfg.DatabaseMaxConns,
-		MinConns: cfg.DatabaseMinConns,
-	})
+	router, dbPool, err := initializeRouter(ctx, cfg)
 	if err != nil {
-		slog.Warn("database connection failed on startup, server running in degraded mode", slog.Any("error", err))
-	} else {
-		defer dbPool.Close()
-		slog.Info("connected to postgres database pool")
+		slog.Error("failed to initialize server dependencies", slog.Any("error", err))
+		os.Exit(1)
 	}
-
-	router := apphttp.NewRouter(apphttp.RouterConfig{
-		Config: cfg,
-		DB:     dbPool,
-	})
+	defer dbPool.Close()
+	slog.Info("connected to postgres database")
 
 	srv := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Port),
@@ -86,4 +76,34 @@ func main() {
 		}
 		slog.Info("server shutdown completed cleanly")
 	}
+}
+
+func initializeRouter(ctx context.Context, cfg *config.Config) (http.Handler, *db.DB, error) {
+	if cfg == nil || cfg.DatabaseURL == "" {
+		return nil, nil, fmt.Errorf("database configuration is required")
+	}
+
+	dbPool, err := db.Connect(ctx, db.Config{
+		URL:      cfg.DatabaseURL,
+		MaxConns: cfg.DatabaseMaxConns,
+		MinConns: cfg.DatabaseMinConns,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("authoritative database connection could not be initialized")
+	}
+
+	if err := dbPool.Ping(ctx); err != nil {
+		dbPool.Close()
+		return nil, nil, fmt.Errorf("authoritative database is unavailable")
+	}
+
+	router, err := apphttp.NewRouter(apphttp.RouterConfig{
+		Config: cfg,
+		DB:     dbPool,
+	})
+	if err != nil {
+		dbPool.Close()
+		return nil, nil, fmt.Errorf("server dependencies could not be initialized")
+	}
+	return router, dbPool, nil
 }

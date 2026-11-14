@@ -20,10 +20,7 @@ func TestRouterEndpoints(t *testing.T) {
 	}
 
 	mockDB := &mockPinger{err: nil}
-	router := NewRouter(RouterConfig{
-		Config: cfg,
-		DB:     mockDB,
-	})
+	router := mustNewTestRouter(t, cfg, mockDB)
 
 	tests := []struct {
 		name       string
@@ -52,16 +49,33 @@ func TestRouterEndpoints(t *testing.T) {
 	}
 }
 
+func TestRouterRequiresExplicitTestRepositories(t *testing.T) {
+	_, err := NewRouter(RouterConfig{
+		Config: &config.Config{Environment: "test"},
+		DB:     &mockPinger{},
+	})
+	if err == nil {
+		t.Fatal("test router must not construct mock repositories implicitly")
+	}
+}
+
+func TestRouterRequiresAuthoritativeDatabaseOutsideTests(t *testing.T) {
+	_, err := NewRouter(RouterConfig{
+		Config: &config.Config{Environment: "production"},
+		DB:     &mockPinger{},
+	})
+	if err == nil {
+		t.Fatal("production router must require authoritative PostgreSQL")
+	}
+}
+
 func TestRouterCORS(t *testing.T) {
 	cfg := &config.Config{
 		Environment:        "test",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
 	}
 
-	router := NewRouter(RouterConfig{
-		Config: cfg,
-		DB:     &mockPinger{err: nil},
-	})
+	router := mustNewTestRouter(t, cfg, &mockPinger{err: nil})
 
 	req := httptest.NewRequest(http.MethodOptions, "/api/v1/health", nil)
 	req.Header.Set("Origin", "http://localhost:3000")
@@ -83,10 +97,7 @@ func TestRouterNotFoundEnvelope(t *testing.T) {
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
 	}
 
-	router := NewRouter(RouterConfig{
-		Config: cfg,
-		DB:     &mockPinger{err: nil},
-	})
+	router := mustNewTestRouter(t, cfg, &mockPinger{err: nil})
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown-path", nil)
 	rr := httptest.NewRecorder()
@@ -126,9 +137,12 @@ func TestTenantProvisionRoutesRequireVerifiedAdminAndCSRF(t *testing.T) {
 		Environment: "test", PublicWebURL: "http://localhost:3000",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
 	}
-	router := NewRouter(RouterConfig{
+	router, err := NewRouter(RouterConfig{
 		Config: cfg, DB: &mockPinger{}, AuthRepo: authRepo, TenantRepo: tenantRepo,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	unauthenticated := httptest.NewRecorder()
 	router.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/platform/tenants", nil))
 	if unauthenticated.Code != http.StatusUnauthorized {
@@ -172,4 +186,18 @@ func TestTenantProvisionRoutesRequireVerifiedAdminAndCSRF(t *testing.T) {
 	if captureResponse.Code != http.StatusOK || !strings.Contains(captureResponse.Body.String(), "/invite/") {
 		t.Fatalf("authorized local mail capture should contain the one-time invite link, status=%d body=%s", captureResponse.Code, captureResponse.Body.String())
 	}
+}
+
+func mustNewTestRouter(t *testing.T, cfg *config.Config, pinger *mockPinger) http.Handler {
+	t.Helper()
+	router, err := NewRouter(RouterConfig{
+		Config:     cfg,
+		DB:         pinger,
+		AuthRepo:   auth.NewMockRepository(),
+		TenantRepo: tenants.NewMockRepository(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return router
 }

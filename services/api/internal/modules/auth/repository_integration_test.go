@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -15,7 +16,7 @@ import (
 )
 
 func TestPostgresAuthLifecycle(t *testing.T) {
-	databaseURL := os.Getenv("SWW_TEST_DATABASE_URL")
+	databaseURL := requireIntegrationDatabaseURL(t)
 	if databaseURL == "" {
 		t.Skip("set SWW_TEST_DATABASE_URL to an isolated PostgreSQL database to run integration tests")
 	}
@@ -24,15 +25,12 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 
 	adminPool, err := pgxpool.New(ctx, databaseURL)
 	if err != nil {
-		t.Fatalf("connect to isolated test database: %v", err)
+		t.Fatal("could not connect to isolated PostgreSQL test database")
 	}
 	defer adminPool.Close()
 	config, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(strings.ToLower(config.ConnConfig.Database), "test") {
-		t.Skip("refusing to create an auth integration schema outside a database whose name contains 'test'")
+		t.Fatal("SWW_TEST_DATABASE_URL is not a valid PostgreSQL URI")
 	}
 
 	if _, err := adminPool.Exec(ctx, `CREATE EXTENSION IF NOT EXISTS citext`); err != nil {
@@ -93,6 +91,7 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 			t.Fatalf("unexpected bootstrap result: %v", err)
 		}
 	}
+
 	if successes != 1 || denied != 1 {
 		t.Fatalf("expected one successful bootstrap and one denial, got successes=%d denied=%d", successes, denied)
 	}
@@ -256,6 +255,29 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 
 	applyMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", "000004_tenants.down.sql"))
 	applyMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", "000003_auth_hardening.down.sql"))
+}
+
+func requireIntegrationDatabaseURL(t *testing.T) string {
+	t.Helper()
+	databaseURL := strings.TrimSpace(os.Getenv("SWW_TEST_DATABASE_URL"))
+	if databaseURL == "" {
+		if os.Getenv("SWW_REQUIRE_POSTGRES_TESTS") == "1" {
+			t.Fatal("SWW_TEST_DATABASE_URL is required when PostgreSQL integration tests are mandatory")
+		}
+		return ""
+	}
+
+	config, err := pgxpool.ParseConfig(databaseURL)
+	if err != nil {
+		t.Fatal("SWW_TEST_DATABASE_URL is not a valid PostgreSQL URI")
+	}
+	databaseName := strings.ToLower(config.ConnConfig.Database)
+	testSegment := regexp.MustCompile(`(^|[^a-z0-9])test([^a-z0-9]|$)`)
+	unsafeSegment := regexp.MustCompile(`(^|[^a-z0-9])(dev|prod|production)([^a-z0-9]|$)`)
+	if !testSegment.MatchString(databaseName) || unsafeSegment.MatchString(databaseName) {
+		t.Fatal("authentication integration tests require a test-only database name")
+	}
+	return databaseURL
 }
 
 func applyMigrationForTest(t *testing.T, ctx context.Context, pool *pgxpool.Pool, path string) {

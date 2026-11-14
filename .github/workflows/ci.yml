@@ -10,6 +10,23 @@ jobs:
   backend-test:
     name: Backend (Go) Tests & Validation
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: sww_ci_test
+          POSTGRES_USER: sww_ci
+          POSTGRES_PASSWORD: sww_ci_ephemeral_only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sww_ci -d sww_ci_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      SWW_TEST_DATABASE_URL: postgres://sww_ci:sww_ci_ephemeral_only@localhost:5432/sww_ci_test?sslmode=disable
+      SWW_REQUIRE_POSTGRES_TESTS: "1"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -17,20 +34,24 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.24.0'
           cache-dependency-path: services/api/go.sum
 
       - name: Verify Go dependencies
         working-directory: services/api
         run: go mod verify
 
+      - name: Run Go tests including required PostgreSQL integration tests
+        working-directory: services/api
+        run: go test -count=1 ./...
+
       - name: Run Go vet
         working-directory: services/api
         run: go vet ./...
 
-      - name: Run Go unit and integration tests
+      - name: Run Go tests with race detector and required PostgreSQL integration tests
         working-directory: services/api
-        run: go test -v -race ./...
+        run: go test -race ./...
 
   frontend-check:
     name: Frontend (Next.js) Typecheck & Build

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -22,19 +23,30 @@ type RouterConfig struct {
 }
 
 // NewRouter constructs the Chi HTTP router with standard middleware and routes.
-func NewRouter(cfg RouterConfig) http.Handler {
-	r := chi.NewRouter()
-
-	// Initialize repository
-	authRepo := cfg.AuthRepo
-	if authRepo == nil {
-		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
-			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
-		} else {
-			authRepo = auth.NewMockRepository()
-		}
+func NewRouter(cfg RouterConfig) (http.Handler, error) {
+	if cfg.Config == nil {
+		return nil, fmt.Errorf("router configuration is required")
 	}
 
+	r := chi.NewRouter()
+
+	authRepo := cfg.AuthRepo
+	tenantRepo := cfg.TenantRepo
+	if authRepo != nil || tenantRepo != nil {
+		if cfg.Config.Environment != "test" {
+			return nil, fmt.Errorf("repository overrides are only allowed in the test environment")
+		}
+		if authRepo == nil || tenantRepo == nil {
+			return nil, fmt.Errorf("test routers require explicitly constructed repositories")
+		}
+	} else {
+		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
+			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
+			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+		} else {
+			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
+		}
+	}
 	authSvc := auth.NewService(authRepo)
 	isSecure := cfg.Config != nil && (cfg.Config.Environment == "production" || cfg.Config.Environment == "staging")
 	var authH *auth.Handler
@@ -43,14 +55,6 @@ func NewRouter(cfg RouterConfig) http.Handler {
 	var mailer auth.Mailer
 	var invitationMailer tenants.InvitationMailer
 	var captureMailer *tenants.CaptureMailer
-	tenantRepo := cfg.TenantRepo
-	if tenantRepo == nil {
-		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
-			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
-		} else {
-			tenantRepo = tenants.NewMockRepository()
-		}
-	}
 	if cfg.Config != nil {
 		allowedOrigins = cfg.Config.CORSAllowedOrigins
 		trustedProxyNets = cfg.Config.TrustedProxyNets
@@ -150,7 +154,7 @@ func NewRouter(cfg RouterConfig) http.Handler {
 		})
 	})
 
-	return r
+	return r, nil
 }
 
 func corsMiddleware(allowedOrigins []string) func(http.Handler) http.Handler {

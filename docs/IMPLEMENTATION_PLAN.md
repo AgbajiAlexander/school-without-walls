@@ -7,6 +7,7 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | [x] SWW-001 | Repository scaffold, CI, API health/ready, local DB/migration workflow | Next.js boots; Go `health/ready` passes; no secrets committed; CI runs | None |
 | [x] SWW-002 | Identity/session + invitations | Login, invitation acceptance, reset, logout, CSRF, revocation and abuse tests pass; PostgreSQL lifecycle integration passes; roles not client-controlled | 001 |
 | [x] SWW-003 | Tenant provisioning + school settings | Two tenants independently configured; verified identity/membership checks; tenant isolation tests pass | 002 |
+| SWW-003H-A | Database, migration and startup security hardening | Explicit PostgreSQL configuration; API fails closed; migration ledger/status/up are transactional and repeat-safe; database-free and isolated-PostgreSQL tests pass | 003 |
 | SWW-004 | Academic year, terms, levels, subjects and teacher assignments | Structural validation, assigned permissions and tenant constraints | 003 |
 | SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004 |
 | SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004 |
@@ -18,13 +19,9 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-012 | Go AI gateway + teacher drafts + student tutor | No exposed secrets, age/tenant gating, human review, safety tests | 006,007 |
 | SWW-013 | E2E hardening, docs, deployment | CI/E2E/security/mobile checks; Vercel + Go HTTPS; backup restore tested | All |
 
-### SWW-002 acceptance verification
+### Previously recorded acceptance results
 
-SWW-002 acceptance gates passed on 14 November 2026. `go test -count=1 ./...`, `go vet ./...`, and `go test -race ./...` passed; race tests ran in Ubuntu WSL with the module-required Go 1.24 toolchain. The PostgreSQL lifecycle integration test passed against a disposable test cluster, and migrations `000001`–`000003` passed up/down validation with no tables left in the rollback schema. Frontend lint, typecheck, and production build passed. No browser E2E test files are currently present; browser E2E remains part of later hardening.
-
-### SWW-003 acceptance verification
-
-SWW-003 acceptance gates passed on 15 November 2026. `go test -count=1 ./...`, `go vet ./...` and `go test -race -count=1 ./...` passed (the race suite ran in WSL using the module-required Go 1.24 toolchain). PostgreSQL integration tests for auth and tenants passed against a disposable PostgreSQL 18 test cluster; migrations `000001`–`000004` applied, tenant-owner invitation acceptance created the server-stored membership and activated the tenant, existing-account invitations preserved credentials, cross-tenant access was denied, duplicate slugs were rejected, settings updates were scoped, and migration `000004` rolled back successfully. Frontend lint, typecheck and production build passed. The repository has no browser E2E tests, so browser E2E remains an explicit later hardening gate.
+The repository previously recorded successful SWW-002 and SWW-003 acceptance checks, including Go tests, PostgreSQL integration checks, migration validation and frontend checks. Their original dates were future-dated, and the underlying historical run evidence is not available in this repository; these results are therefore retained only as unverified historical claims and were not independently confirmed during SWW-003H-A.
 
 ## Sprint rhythm (not calendar commitments)
 
