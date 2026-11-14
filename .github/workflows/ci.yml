@@ -29,8 +29,10 @@ jobs:
         run: |
           set -euo pipefail
           database_password="$(openssl rand -hex 32)"
+          database_url="postgres://sww_ci:${database_password}@127.0.0.1:5432/sww_ci_test?sslmode=disable"
           echo "::add-mask::$database_password"
-          printf 'SWW_TEST_DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_ci_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
+          echo "::add-mask::$database_url"
+          printf 'SWW_TEST_DATABASE_URL=%s\n' "$database_url" >> "$GITHUB_ENV"
           export POSTGRES_PASSWORD="$database_password"
           docker run --detach --name sww-backend-postgres \
             --publish 5432:5432 \
@@ -137,10 +139,12 @@ jobs:
           set -euo pipefail
           database_password="$(openssl rand -hex 32)"
           admin_password="$(python3 -c 'import secrets, string; groups=(string.ascii_lowercase, string.ascii_uppercase, string.digits, "!@#$%^&*_-"); chars=[secrets.choice(group) for group in groups]; alphabet="".join(groups); chars.extend(secrets.choice(alphabet) for _ in range(28)); secrets.SystemRandom().shuffle(chars); print("".join(chars))')"
+          database_url="postgres://sww_ci:${database_password}@127.0.0.1:5432/sww_e2e_test?sslmode=disable"
           echo "::add-mask::$database_password"
+          echo "::add-mask::$database_url"
           echo "::add-mask::$admin_password"
-          printf 'DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_e2e_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
-          printf 'SWW_TEST_DATABASE_URL=postgres://sww_ci:%s@127.0.0.1:5432/sww_e2e_test?sslmode=disable\n' "$database_password" >> "$GITHUB_ENV"
+          printf 'DATABASE_URL=%s\n' "$database_url" >> "$GITHUB_ENV"
+          printf 'SWW_TEST_DATABASE_URL=%s\n' "$database_url" >> "$GITHUB_ENV"
           printf 'BOOTSTRAP_ADMIN_EMAIL=ci-admin@example.test\n' >> "$GITHUB_ENV"
           printf 'BOOTSTRAP_ADMIN_NAME=Fictional Test User\n' >> "$GITHUB_ENV"
           printf 'BOOTSTRAP_ADMIN_PASSWORD=%s\n' "$admin_password" >> "$GITHUB_ENV"
