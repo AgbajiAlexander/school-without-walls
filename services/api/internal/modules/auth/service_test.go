@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -111,6 +112,50 @@ func TestInvitationAcceptanceCreatesMembershipFromStoredInvitation(t *testing.T)
 	if len(repo.AuditEvents) == 0 || repo.AuditEvents[len(repo.AuditEvents)-1].TenantID == nil ||
 		*repo.AuditEvents[len(repo.AuditEvents)-1].TenantID != tenantID {
 		t.Fatal("tenant invitation acceptance should produce a tenant-scoped audit event")
+	}
+}
+
+func TestAcceptInvitationValidatesFullNameWithoutSideEffects(t *testing.T) {
+	tests := []struct {
+		name     string
+		fullName string
+	}{
+		{name: "empty"},
+		{name: "whitespace", fullName: " \t\u00a0 "},
+		{name: "overlength unicode", fullName: strings.Repeat("é", 151)},
+		{name: "control character", fullName: "Fictional\nUser"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := NewMockRepository()
+			service := NewService(repo)
+			rawToken, err := GenerateSecureToken(32)
+			if err != nil {
+				t.Fatal(err)
+			}
+			invitation := &Invitation{
+				ID: uuid.New(), InvitedEmail: "fictional-invitee@school.invalid",
+				TokenHash: HashToken(rawToken), Status: InvitationStatusPending,
+				ExpiresAt: time.Now().Add(time.Hour),
+			}
+			if err := repo.CreateInvitation(context.Background(), invitation); err != nil {
+				t.Fatal(err)
+			}
+
+			_, _, _, err = service.AcceptInvitation(context.Background(), rawToken, tt.fullName,
+				"a strong fictional test password", "127.0.0.1", "test-agent", "invalid-name")
+			if !errors.Is(err, ErrInvalidFullName) {
+				t.Fatalf("expected typed invalid-full-name error, got %v", err)
+			}
+			if len(repo.Users) != 0 || len(repo.Memberships) != 0 || len(repo.Sessions) != 0 {
+				t.Fatalf("invalid invitation input caused side effects: users=%d memberships=%d sessions=%d",
+					len(repo.Users), len(repo.Memberships), len(repo.Sessions))
+			}
+			if invitation.Status != InvitationStatusPending {
+				t.Fatal("invalid invitation input consumed the invitation")
+			}
+		})
 	}
 }
 

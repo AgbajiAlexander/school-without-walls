@@ -2,10 +2,13 @@ package http
 
 import (
 	"context"
+	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/school-without-walls/api/internal/platform/db"
+	"github.com/school-without-walls/api/internal/platform/middleware"
 )
 
 var startTime = time.Now()
@@ -47,14 +50,22 @@ func (h *ReadyHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if h.pinger == nil {
-		ErrorJSON(w, r, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "Database pinger uninitialized", map[string]any{
-			"database": "uninitialized",
+		slog.WarnContext(r.Context(), "database readiness check unavailable",
+			"request_id", middleware.GetRequestID(r.Context()),
+			"reason", "pinger_uninitialized",
+		)
+		ErrorJSON(w, r, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "Database is unavailable", map[string]any{
+			"database": "disconnected",
 		})
 		return
 	}
 
 	if err := h.pinger.Ping(ctx); err != nil {
-		ErrorJSON(w, r, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "Database not ready: "+err.Error(), map[string]any{
+		slog.WarnContext(r.Context(), "database readiness check failed",
+			"request_id", middleware.GetRequestID(r.Context()),
+			"error_type", fmt.Sprintf("%T", err),
+		)
+		ErrorJSON(w, r, http.StatusServiceUnavailable, ErrCodeServiceUnavailable, "Database is unavailable", map[string]any{
 			"database": "disconnected",
 		})
 		return

@@ -186,6 +186,10 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		r.Context(), req.Token, req.FullName, req.Password, ip, r.UserAgent(), reqID,
 	)
 	if err != nil {
+		if errors.Is(err, ErrInvalidFullName) {
+			apphttp.ErrorJSON(w, r, http.StatusUnprocessableEntity, apphttp.ErrCodeInvalidInput, ErrInvalidFullName.Error(), nil)
+			return
+		}
 		if errors.Is(err, ErrInvitationNotFound) {
 			apphttp.ErrorJSON(w, r, http.StatusUnprocessableEntity, apphttp.ErrCodeInvalidInput, "Invitation token is invalid, expired, or already used", nil)
 			return

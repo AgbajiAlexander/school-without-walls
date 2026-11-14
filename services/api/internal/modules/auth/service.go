@@ -8,6 +8,7 @@ import (
 	"net/mail"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
@@ -15,6 +16,7 @@ import (
 
 var (
 	ErrInvalidCredentials       = errors.New("invalid email or password")
+	ErrInvalidFullName          = errors.New("full name must contain 1 to 150 valid characters")
 	ErrAccountSuspended         = errors.New("this account has been suspended")
 	ErrAccountPendingActivation = errors.New("account is pending activation; please use your invitation link")
 	ErrInvalidEmail             = errors.New("invalid email format")
@@ -200,8 +202,9 @@ func (s *Service) AcceptInvitation(ctx context.Context, rawToken, fullName, pass
 		return nil, "", "", ErrInvitationNotFound
 	}
 	trimmedName := strings.TrimSpace(fullName)
-	if trimmedName == "" || len(trimmedName) > 150 {
-		return nil, "", "", errors.New("full name is required")
+	if !utf8.ValidString(trimmedName) || utf8.RuneCountInString(trimmedName) == 0 ||
+		utf8.RuneCountInString(trimmedName) > 150 || strings.IndexFunc(trimmedName, unicode.IsControl) >= 0 {
+		return nil, "", "", ErrInvalidFullName
 	}
 	if err := ValidatePasswordPolicy(password); err != nil {
 		return nil, "", "", err

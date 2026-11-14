@@ -1,11 +1,14 @@
 package http
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/school-without-walls/api/internal/platform/middleware"
@@ -79,11 +82,16 @@ func TestReadyHandlerSuccess(t *testing.T) {
 }
 
 func TestReadyHandlerFailure(t *testing.T) {
-	h := NewReadyHandler(&mockPinger{err: errors.New("connection refused")})
+	const diagnostic = "password=private-pass user=private-user host=private-db.invalid dbname=private-db token=private-token"
+	h := NewReadyHandler(&mockPinger{err: errors.New(diagnostic)})
 	handler := middleware.RequestID(http.HandlerFunc(h.Ready))
-
 	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
 	rr := httptest.NewRecorder()
+
+	var logOutput bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&logOutput, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 
 	handler.ServeHTTP(rr, req)
 
@@ -99,6 +107,24 @@ func TestReadyHandlerFailure(t *testing.T) {
 	if resp.Error.Code != ErrCodeServiceUnavailable {
 		t.Errorf("expected error code %s, got %s", ErrCodeServiceUnavailable, resp.Error.Code)
 	}
+	if strings.Contains(rr.Body.String(), diagnostic) ||
+		strings.Contains(rr.Body.String(), "private-pass") ||
+		strings.Contains(rr.Body.String(), "private-user") ||
+		strings.Contains(rr.Body.String(), "private-db") ||
+		strings.Contains(rr.Body.String(), "private-token") {
+		t.Fatal("readiness response exposed database diagnostics")
+	}
+	if !strings.Contains(rr.Body.String(), "Database is unavailable") ||
+		!strings.Contains(rr.Body.String(), "disconnected") {
+		t.Fatalf("readiness response should contain only generic status information: %s", rr.Body.String())
+	}
+	if strings.Contains(logOutput.String(), diagnostic) ||
+		strings.Contains(logOutput.String(), "private-pass") ||
+		strings.Contains(logOutput.String(), "private-user") ||
+		strings.Contains(logOutput.String(), "private-db") ||
+		strings.Contains(logOutput.String(), "private-token") {
+		t.Fatal("readiness logs exposed database diagnostics")
+	}
 }
 
 func TestReadyHandlerNilPinger(t *testing.T) {
@@ -112,5 +138,8 @@ func TestReadyHandlerNilPinger(t *testing.T) {
 
 	if rr.Code != http.StatusServiceUnavailable {
 		t.Errorf("expected status 503, got %d", rr.Code)
+	}
+	if strings.Contains(rr.Body.String(), "uninitialized") {
+		t.Fatal("readiness response should use generic unavailable wording")
 	}
 }

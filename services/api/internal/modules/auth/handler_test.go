@@ -4,10 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,15 +21,45 @@ import (
 	apphttp "github.com/school-without-walls/api/internal/platform/response"
 )
 
-type testMailer struct{}
+type testMailMessage struct {
+	To      string
+	Subject string
+	Body    string
+}
 
-func (testMailer) SendPasswordReset(context.Context, string, string, time.Time) error {
+type testMailer struct {
+	mu       sync.Mutex
+	messages []testMailMessage
+}
+
+func (m *testMailer) SendPasswordReset(_ context.Context, email, token string, _ time.Time) error {
+	resetURL := &url.URL{Scheme: "http", Host: "localhost", Path: "/reset-password"}
+	query := resetURL.Query()
+	query.Set("token", token)
+	resetURL.RawQuery = query.Encode()
+	m.mu.Lock()
+	m.messages = append(m.messages, testMailMessage{
+		To: email, Subject: "Reset password", Body: "Reset password: " + resetURL.String(),
+	})
+	m.mu.Unlock()
 	return nil
 }
 
+func (m *testMailer) capturedMessages() []testMailMessage {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	messages := make([]testMailMessage, len(m.messages))
+	copy(messages, m.messages)
+	return messages
+}
+
 func setupTestRouter(repo Repository) (http.Handler, *Service, *Handler) {
+	return setupTestRouterWithMailer(repo, &testMailer{})
+}
+
+func setupTestRouterWithMailer(repo Repository, mailer Mailer) (http.Handler, *Service, *Handler) {
 	svc := NewService(repo)
-	handler := NewHandler(svc, false, testMailer{}, nil)
+	handler := NewHandler(svc, false, mailer, nil)
 
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
@@ -369,23 +403,134 @@ func TestHandlerInvitationAcceptance(t *testing.T) {
 	}
 }
 
+func TestHandlerInvitationValidationReturns422WithoutSideEffects(t *testing.T) {
+	tests := []struct {
+		name     string
+		fullName string
+	}{
+		{name: "empty"},
+		{name: "whitespace", fullName: " \t\u00a0 "},
+		{name: "overlength unicode", fullName: strings.Repeat("é", 151)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := NewMockRepository()
+			router, _, _ := setupTestRouter(repo)
+			rawToken, err := GenerateSecureToken(32)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tenantID := uuid.New()
+			invitation := &Invitation{
+				ID: uuid.New(), TenantID: &tenantID, InvitedEmail: "fictional-invitee@school.invalid",
+				TargetRole: "TEACHER", TokenHash: HashToken(rawToken),
+				Status: InvitationStatusPending, ExpiresAt: time.Now().Add(time.Hour),
+			}
+			if err := repo.CreateInvitation(context.Background(), invitation); err != nil {
+				t.Fatal(err)
+			}
+			body, err := json.Marshal(AcceptInvitationRequest{
+				Token: rawToken, FullName: tt.fullName, Password: "strong fictional password",
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/invitations/accept", bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+
+			if recorder.Code != http.StatusUnprocessableEntity {
+				t.Fatalf("invalid name must return 422, got %d: %s", recorder.Code, recorder.Body.String())
+			}
+			if len(repo.Users) != 0 || len(repo.Memberships) != 0 || len(repo.Sessions) != 0 {
+				t.Fatalf("invalid invitation input caused side effects: users=%d memberships=%d sessions=%d",
+					len(repo.Users), len(repo.Memberships), len(repo.Sessions))
+			}
+			if invitation.Status != InvitationStatusPending {
+				t.Fatal("invalid invitation request consumed its token")
+			}
+		})
+	}
+}
+
+func TestHandlerInvitationInvalidAndExpiredTokensReturn422(t *testing.T) {
+	repo := NewMockRepository()
+	router, _, _ := setupTestRouter(repo)
+	expiredToken, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateInvitation(context.Background(), &Invitation{
+		ID: uuid.New(), InvitedEmail: "expired@school.invalid", TokenHash: HashToken(expiredToken),
+		Status: InvitationStatusPending, ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, token := range []string{"not-an-invitation", expiredToken} {
+		body, err := json.Marshal(AcceptInvitationRequest{
+			Token: token, FullName: "Fictional Invitee", Password: "strong fictional password",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/invitations/accept", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		recorder := httptest.NewRecorder()
+		router.ServeHTTP(recorder, request)
+		if recorder.Code != http.StatusUnprocessableEntity ||
+			!strings.Contains(recorder.Body.String(), "invalid, expired, or already used") {
+			t.Fatalf("invalid/expired invitation must retain generic 422 behavior, got %d: %s",
+				recorder.Code, recorder.Body.String())
+		}
+	}
+	if len(repo.Users) != 0 || len(repo.Memberships) != 0 || len(repo.Sessions) != 0 {
+		t.Fatalf("invalid/expired invitation caused side effects: users=%d memberships=%d sessions=%d",
+			len(repo.Users), len(repo.Memberships), len(repo.Sessions))
+	}
+}
+
 func TestHandlerPasswordResetFlow(t *testing.T) {
 	repo := NewMockRepository()
-	router, svc, _ := setupTestRouter(repo)
+	mailer := &testMailer{}
+	router, svc, _ := setupTestRouterWithMailer(repo, mailer)
+	var capturedLogs bytes.Buffer
+	previousLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&capturedLogs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previousLogger) })
 
 	oldPwd := "OldPassword123!"
-	pwdHash, _ := HashPassword(oldPwd)
+	pwdHash, err := HashPassword(oldPwd)
+	if err != nil {
+		t.Fatal(err)
+	}
 	user := &User{
 		ID:           uuid.New(),
-		Email:        "student@school.ng",
+		Email:        "fictional-reset-user@school.invalid",
 		PasswordHash: pwdHash,
-		FullName:     "Student Reset",
+		FullName:     "Fictional Reset User",
 		Status:       UserStatusActive,
 	}
-	_ = repo.CreateUser(context.Background(), user)
+	if err := repo.CreateUser(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+
+	_, firstSession, _, err := svc.Login(context.Background(), user.Email, oldPwd, "127.0.0.1", "test-agent", "login-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, secondSession, _, err := svc.Login(context.Background(), user.Email, oldPwd, "127.0.0.1", "test-agent", "login-2")
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// 1. Forgot password request (generic message)
-	forgotBody, _ := json.Marshal(ForgotPasswordRequest{Email: "student@school.ng"})
+	forgotBody, err := json.Marshal(ForgotPasswordRequest{Email: user.Email})
+	if err != nil {
+		t.Fatal(err)
+	}
 	reqForgot := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(forgotBody))
 	reqForgot.Header.Set("Content-Type", "application/json")
 	rrForgot := httptest.NewRecorder()
@@ -394,15 +539,32 @@ func TestHandlerPasswordResetFlow(t *testing.T) {
 	if rrForgot.Code != http.StatusAccepted {
 		t.Fatalf("expected 202 for forgot password, got %d", rrForgot.Code)
 	}
-
-	// Directly generate a test token through service to test the reset-password endpoint
-	token, _ := svc.RequestPasswordReset(context.Background(), "student@school.ng", "req-test")
+	if strings.Contains(rrForgot.Body.String(), "token") || strings.Contains(rrForgot.Body.String(), oldPwd) {
+		t.Fatal("forgot-password response must not expose secrets")
+	}
+	messages := mailer.capturedMessages()
+	if len(messages) != 1 || messages[0].To != user.Email {
+		t.Fatalf("expected one captured reset email for the fictional account, messages=%d", len(messages))
+	}
+	resetURLText := strings.TrimPrefix(messages[0].Body, "Reset password: ")
+	resetURL, err := url.Parse(strings.TrimSpace(resetURLText))
+	if err != nil {
+		t.Fatal("captured reset email did not contain a valid link")
+	}
+	token := resetURL.Query().Get("token")
+	if token == "" || !strings.Contains(messages[0].Body, "/reset-password?") {
+		t.Fatal("captured reset email must contain the one-time reset link")
+	}
 
 	// 2. Reset password endpoint
-	resetBody, _ := json.Marshal(ResetPasswordRequest{
+	newPassword := "BrandNewS3cureP@ssword99!"
+	resetBody, err := json.Marshal(ResetPasswordRequest{
 		Token:       token,
-		NewPassword: "BrandNewS3cureP@ssword99!",
+		NewPassword: newPassword,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	reqReset := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(resetBody))
 	reqReset.Header.Set("Content-Type", "application/json")
 	rrReset := httptest.NewRecorder()
@@ -411,18 +573,190 @@ func TestHandlerPasswordResetFlow(t *testing.T) {
 	if rrReset.Code != http.StatusOK {
 		t.Fatalf("expected reset password status 200, got %d: %s", rrReset.Code, rrReset.Body.String())
 	}
+	if strings.Contains(rrReset.Body.String(), token) || strings.Contains(rrReset.Body.String(), newPassword) {
+		t.Fatal("reset-password response exposed a token or password")
+	}
+	for _, sessionToken := range []string{firstSession, secondSession} {
+		if _, _, err := svc.ValidateSession(context.Background(), sessionToken); !errors.Is(err, ErrSessionNotFound) {
+			t.Fatalf("password reset must revoke all active sessions, got %v", err)
+		}
+	}
 
-	// 3. Login with new password
-	loginBody, _ := json.Marshal(LoginRequest{
-		Email:    "student@school.ng",
-		Password: "BrandNewS3cureP@ssword99!",
+	oldLoginBody, err := json.Marshal(LoginRequest{Email: user.Email, Password: oldPwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldLoginRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(oldLoginBody))
+	oldLoginRequest.Header.Set("Content-Type", "application/json")
+	oldLoginResponse := httptest.NewRecorder()
+	router.ServeHTTP(oldLoginResponse, oldLoginRequest)
+	if oldLoginResponse.Code != http.StatusUnauthorized {
+		t.Fatalf("old password must fail after reset, got %d", oldLoginResponse.Code)
+	}
+
+	newLoginBody, err := json.Marshal(LoginRequest{
+		Email:    user.Email,
+		Password: newPassword,
 	})
-	reqLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(loginBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqLogin := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", bytes.NewReader(newLoginBody))
 	reqLogin.Header.Set("Content-Type", "application/json")
 	rrLogin := httptest.NewRecorder()
 	router.ServeHTTP(rrLogin, reqLogin)
-
 	if rrLogin.Code != http.StatusOK {
-		t.Errorf("expected login with new password to succeed, got %d", rrLogin.Code)
+		t.Fatalf("login with new password should succeed, got %d", rrLogin.Code)
+	}
+
+	replayRequest := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(resetBody))
+	replayRequest.Header.Set("Content-Type", "application/json")
+	replayResponse := httptest.NewRecorder()
+	router.ServeHTTP(replayResponse, replayRequest)
+	if replayResponse.Code != http.StatusUnprocessableEntity || strings.Contains(replayResponse.Body.String(), token) {
+		t.Fatalf("reset-token replay must be rejected without exposing the token: status=%d body=%s",
+			replayResponse.Code, replayResponse.Body.String())
+	}
+	for _, secret := range []string{token, oldPwd, newPassword} {
+		if strings.Contains(capturedLogs.String(), secret) {
+			t.Fatal("password reset token or password appeared in application logs")
+		}
+	}
+}
+
+func TestHandlerForgotPasswordDoesNotEnumerateAccounts(t *testing.T) {
+	repo := NewMockRepository()
+	mailer := &testMailer{}
+	router, _, _ := setupTestRouterWithMailer(repo, mailer)
+	passwordHash, err := HashPassword("fictional account password phrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateUser(context.Background(), &User{
+		ID: uuid.New(), Email: "known-reset-user@school.invalid",
+		PasswordHash: passwordHash, FullName: "Fictional User", Status: UserStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	messages := make([]string, 0, 2)
+	for _, email := range []string{"known-reset-user@school.invalid", "missing-reset-user@school.invalid"} {
+		body, err := json.Marshal(ForgotPasswordRequest{Email: email})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusAccepted {
+			t.Fatalf("forgot-password should return generic 202, got %d", response.Code)
+		}
+		var payload struct {
+			Data struct {
+				Message string `json:"message"`
+			} `json:"data"`
+		}
+		if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+			t.Fatal(err)
+		}
+		messages = append(messages, payload.Data.Message)
+	}
+	if messages[0] == "" || messages[0] != messages[1] {
+		t.Fatal("forgot-password response must be identical for known and unknown accounts")
+	}
+	if len(mailer.capturedMessages()) != 1 {
+		t.Fatal("only the known fictional account should receive a captured message")
+	}
+}
+
+func TestHandlerResetPasswordRejectsInvalidAndExpiredTokens(t *testing.T) {
+	repo := NewMockRepository()
+	router, _, _ := setupTestRouter(repo)
+	passwordHash, err := HashPassword("fictional account password phrase")
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &User{
+		ID: uuid.New(), Email: "expired-reset-user@school.invalid",
+		PasswordHash: passwordHash, FullName: "Fictional User", Status: UserStatusActive,
+	}
+	if err := repo.CreateUser(context.Background(), user); err != nil {
+		t.Fatal(err)
+	}
+	expiredToken, err := GenerateSecureToken(32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreatePasswordReset(context.Background(), &PasswordReset{
+		ID: uuid.New(), UserID: user.ID, TokenHash: HashToken(expiredToken),
+		ExpiresAt: time.Now().Add(-time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, token := range []string{"invalid-reset-token", expiredToken} {
+		body, err := json.Marshal(ResetPasswordRequest{
+			Token: token, NewPassword: "a replacement fictional password",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/reset-password", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if response.Code != http.StatusUnprocessableEntity ||
+			!strings.Contains(response.Body.String(), "invalid, expired, or already used") {
+			t.Fatalf("invalid/expired reset token must return generic 422, got %d: %s",
+				response.Code, response.Body.String())
+		}
+		if strings.Contains(response.Body.String(), token) {
+			t.Fatal("reset error response must not expose the supplied token")
+		}
+	}
+	userAfter, err := repo.GetUserByID(context.Background(), user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if userAfter.PasswordHash != passwordHash {
+		t.Fatal("invalid or expired reset token changed the account password")
+	}
+}
+
+func TestHandlerForgotPasswordRateLimit(t *testing.T) {
+	repo := NewMockRepository()
+	mailer := &testMailer{}
+	router, _, _ := setupTestRouterWithMailer(repo, mailer)
+	passwordHash, err := HashPassword("fictional rate-limited password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.CreateUser(context.Background(), &User{
+		ID: uuid.New(), Email: "rate-limited@school.invalid",
+		PasswordHash: passwordHash, FullName: "Fictional User", Status: UserStatusActive,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	for attempt := 1; attempt <= 4; attempt++ {
+		body, err := json.Marshal(ForgotPasswordRequest{Email: "rate-limited@school.invalid"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/forgot-password", bytes.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.RemoteAddr = "198.51.100.45:1234"
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		if attempt <= 3 && response.Code != http.StatusAccepted {
+			t.Fatalf("password reset attempt %d should be accepted, got %d", attempt, response.Code)
+		}
+		if attempt == 4 && response.Code != http.StatusTooManyRequests {
+			t.Fatalf("fourth account reset attempt should be rate limited, got %d", response.Code)
+		}
+	}
+	if len(mailer.capturedMessages()) != 3 {
+		t.Fatalf("rate-limited request must not send email, captured=%d", len(mailer.capturedMessages()))
 	}
 }
