@@ -83,7 +83,9 @@ test("real backend rejects invalid credentials", async ({ page }) => {
   await page.getByLabel("Password", { exact: true }).fill(`${credentials.adminPassword}-incorrect`);
   await page.getByRole("button", { name: "Sign in" }).click();
 
-  await expect(page.getByRole("alert")).toContainText("Invalid email or password");
+  await expect(
+    page.getByRole("alert").filter({ hasText: "Invalid email or password" }),
+  ).toContainText("Invalid email or password");
   expect(await page.context().cookies("https://127.0.0.1:3443"))
     .not.toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "__Host-sww_session" }),
