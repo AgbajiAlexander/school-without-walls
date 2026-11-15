@@ -100,7 +100,8 @@ Legend: M=manage/configure; W=write in assigned scope; R=read authorized scope; 
 | Tenant configuration | — | M | M | R | — | — | — | — |
 | Roles and invitations | — | M | M | R | — | — | — | — |
 | Student & guardian records | — | R | M | R | R assigned | S | S | limited R |
-| Academic structure | — | R | M | M | R | R | R linked | — |
+| Academic sessions and terms | — | M | M | M | R | R | R linked | — |
+| Academic structure (levels, classes, subjects) | — | R | M | M | R | R | R linked | — |
 | Teacher assignments | — | R | M | M | R self | — | — | — |
 | Curriculum framework imports | — | R | M | P | R | — | — | — |
 | Lessons | — | R | R | P | W assigned | R enrolled/published | R linked/published | — |
@@ -122,14 +123,14 @@ Legend: M=manage/configure; W=write in assigned scope; R=read authorized scope; 
 
 1. Operator authenticated with an elevated platform account creates tenant slug, display name and default locale/timezone.
 2. Backend validates slug uniqueness and creates a tenant, default settings and one invitation for initial school owner as one transaction.
-3. School owner accepts time-limited single-use invitation, sets authentication credentials and configures branding, education stages, academic year and terms.
+3. School owner accepts time-limited single-use invitation, sets authentication credentials and configures branding, education stages, academic session and terms.
 4. Operator lists tenant metadata only. No automatic access to student records.
 
 **Failure/edge cases:** duplicate slug -> 409; expired invitation -> rejected; second redemption -> rejected; unsafe logo -> rejected; failed provisioning -> no partially active school.
 
-### J-02 School administrator sets up academic structure
+### J-02 School owner, administrator or principal sets up academic sessions
 
-Create academic year -> terms -> levels -> class sections -> subjects -> teacher assignments -> students' enrolments. Attempt to overlap active terms or duplicate a class code in the same academic year is rejected. Historical years remain queryable read-only after closure.
+An authorized school owner, school administrator or principal creates an academic session and configures exactly three ordered terms with school-specific dates. Each term must fall within the session and no term date ranges may overlap. All three valid terms must exist before the session can be activated; a school may have at most one active session. Active session and term date changes remain authorized, validated and audited. Archiving is explicit, does not automatically archive or replace another session, and makes the session and its terms read-only. Historical sessions remain queryable as read-only records. Levels, classes, subjects, assignments and enrolments are added in later academic milestones.
 
 ### J-03 Admit student and link guardian
 
@@ -187,7 +188,7 @@ Format: **FR-ID / priority / behavior / acceptance**. All P0 items are launch ga
 
 ### 7.2 Academics and people
 
-- **FR-ACA-001 P0:** CRUD academic years, terms, levels, sections and subjects with active/inactive state and tenant-local unique constraints. **Accept:** duplicates/invalid dates receive structured 422 errors.
+- **FR-ACA-001 P0:** Configure tenant-scoped academic sessions and exactly three ordered terms with school-defined dates. Owners, admins and principals manage sessions and terms; active tenant members may read them. At most one session is active, terms are bounded by their session and cannot overlap, and archived sessions/terms are read-only. Active date changes are authorized, validated and audited. **Accept:** invalid dates receive structured 422 errors; duplicate identifiers, duplicate term sequences, overlaps, missing terms at activation, and a second active session are rejected; cross-tenant access is denied.
 - **FR-ACA-002 P0:** Teacher assignments to subject + class/section + academic period. **Accept:** teacher writes only in current assignment.
 - **FR-ACA-003 P0:** Enrollment into class per academic year with optional transfer history. **Accept:** one primary active section per student per term; history remains.
 - **FR-PEO-001 P0:** Create/list/update student profile, guardians and links. **Accept:** guardian unlink prevents subsequent reads; private fields excluded from teacher listing where unnecessary.
@@ -292,7 +293,7 @@ Use PostgreSQL with Go-generated UUIDv7/UUIDv4 (chosen in ADR) and timestamptz U
 - **Lesson:** `DRAFT -> IN_REVIEW -> APPROVED -> PUBLISHED -> ARCHIVED`. In MVP school can disable reviewer step (`DRAFT -> PUBLISHED` by authorized teacher), but all publications logged.
 - **Assignment:** `DRAFT -> OPEN -> CLOSED`; submission: `NOT_SUBMITTED -> SUBMITTED -> RETURNED` and optional `RESUBMITTED` with revisions.
 - **Report:** `DRAFT -> UNDER_REVIEW -> PUBLISHED -> AMENDED` with an immutable new version per amendment.
-- **Academic year:** `PLANNED -> ACTIVE -> CLOSED`; reopening is controlled, audited admin workflow.
+- **Academic session (SWW-004A):** `DRAFT -> ACTIVE -> ARCHIVED`, with `DRAFT -> ARCHIVED` also allowed. `ARCHIVED` is terminal and read-only; activation requires exactly three valid ordered, non-overlapping terms; at most one session is `ACTIVE` per tenant. Archiving is explicit and never activates or archives another session.
 - **AI content:** `GENERATED_DRAFT -> HUMAN_REVIEWED -> PUBLISHED`; never implicitly advance.
 
 **Grade formula:** for score component `c`, normalized contribution = `(score_c / max_score_c) * weight_c`; total = sum contributions with decimals, rounded only for display/report by tenant policy. Missing scores are `NULL`, not zero; publish blocked unless an authorized explicit missing-score policy applies. Grade bands must be exhaustive and non-overlapping for numerical reports.
@@ -313,7 +314,9 @@ Base prefix `/api/v1`; JSON with consistent envelope `{data, meta}` or `{error:{
 | GET/PATCH `/students/{id}` | Authorized users | field projections differ by role |
 | POST `/students/{id}/guardians` | Admin | validates same-school relation |
 | GET/POST `/staff`, `/teacher-assignments` | Admin/principal | scope and assignment |
-| GET/POST `/academic-years`, `/terms`, `/class-sections`, `/subjects` | Admin/principal | academic validation |
+| GET/POST `/tenants/{slug}/academic-sessions`; GET/PATCH `/tenants/{slug}/academic-sessions/{id}` | Owner/admin/principal manage; active tenant members read | Tenant-scoped; date updates validated and audited |
+| GET/PUT `/tenants/{slug}/academic-sessions/{id}/terms`; POST `/tenants/{slug}/academic-sessions/{id}/activate`; POST `/tenants/{slug}/academic-sessions/{id}/archive` | Owner/admin/principal manage; active tenant members read | Exactly three ordered terms; non-overlap; lifecycle and audit constraints |
+| GET/POST `/academic-levels`, `/class-sections`, `/subjects` | Admin/principal | Later academic milestone; tenant-scoped validation |
 | GET `/curriculum/frameworks`; GET `/curriculum/objectives` | Authorized member | published curated frameworks |
 | POST `/curriculum/alignments` | Curriculum manager/admin | review workflow |
 | GET/POST `/lessons` | Teacher/authorized | create/edit/publish actions separate |
