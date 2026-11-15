@@ -8,6 +8,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/school-without-walls/api/internal/config"
+	"github.com/school-without-walls/api/internal/modules/academics"
 	"github.com/school-without-walls/api/internal/modules/auth"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
@@ -16,10 +17,11 @@ import (
 
 // RouterConfig holds dependencies for building the HTTP router.
 type RouterConfig struct {
-	Config     *config.Config
-	DB         db.Pinger
-	AuthRepo   auth.Repository
-	TenantRepo tenants.Repository
+	Config       *config.Config
+	DB           db.Pinger
+	AuthRepo     auth.Repository
+	TenantRepo   tenants.Repository
+	AcademicRepo academics.Repository
 }
 
 // NewRouter constructs the Chi HTTP router with standard middleware and routes.
@@ -32,17 +34,19 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
-	if authRepo != nil || tenantRepo != nil {
+	academicRepo := cfg.AcademicRepo
+	if authRepo != nil || tenantRepo != nil || academicRepo != nil {
 		if cfg.Config.Environment != "test" {
 			return nil, fmt.Errorf("repository overrides are only allowed in the test environment")
 		}
-		if authRepo == nil || tenantRepo == nil {
+		if authRepo == nil || tenantRepo == nil || academicRepo == nil {
 			return nil, fmt.Errorf("test routers require explicitly constructed repositories")
 		}
 	} else {
 		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
 			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -71,6 +75,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	authH = auth.NewHandler(authSvc, isSecure, mailer, trustedProxyNets)
 	tenantSvc := tenants.NewService(tenantRepo, invitationMailer)
 	tenantH := tenants.NewHandler(tenantSvc, captureMailer)
+	academicH := academics.NewHandler(academics.NewService(academicRepo))
 
 	// Base middleware stack
 	r.Use(middleware.Recoverer)
@@ -152,6 +157,15 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
 		})
+
+		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions", academicH.ListSessions)
+		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions", academicH.CreateSession)
+		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}", academicH.GetSession)
+		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/academic-sessions/{sessionID}", academicH.UpdateSession)
+		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}/terms", academicH.GetTerms)
+		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/academic-sessions/{sessionID}/terms", academicH.ConfigureTerms)
+		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/activate", academicH.ActivateSession)
+		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/archive", academicH.ArchiveSession)
 	})
 
 	return r, nil

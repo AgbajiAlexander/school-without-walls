@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/school-without-walls/api/internal/config"
+	"github.com/school-without-walls/api/internal/modules/academics"
 	"github.com/school-without-walls/api/internal/modules/auth"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 )
@@ -132,13 +133,14 @@ func TestTenantProvisionRoutesRequireVerifiedAdminAndCSRF(t *testing.T) {
 		t.Fatal(err)
 	}
 	tenantRepo := tenants.NewMockRepository()
+	academicRepo := academics.NewMockRepository()
 	tenantRepo.PlatformAdmins[user.ID] = true
 	cfg := &config.Config{
 		Environment: "test", PublicWebURL: "http://localhost:3000",
 		CORSAllowedOrigins: []string{"http://localhost:3000"},
 	}
 	router, err := NewRouter(RouterConfig{
-		Config: cfg, DB: &mockPinger{}, AuthRepo: authRepo, TenantRepo: tenantRepo,
+		Config: cfg, DB: &mockPinger{}, AuthRepo: authRepo, TenantRepo: tenantRepo, AcademicRepo: academicRepo,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,13 +193,106 @@ func TestTenantProvisionRoutesRequireVerifiedAdminAndCSRF(t *testing.T) {
 func mustNewTestRouter(t *testing.T, cfg *config.Config, pinger *mockPinger) http.Handler {
 	t.Helper()
 	router, err := NewRouter(RouterConfig{
-		Config:     cfg,
-		DB:         pinger,
-		AuthRepo:   auth.NewMockRepository(),
-		TenantRepo: tenants.NewMockRepository(),
+		Config:       cfg,
+		DB:           pinger,
+		AuthRepo:     auth.NewMockRepository(),
+		TenantRepo:   tenants.NewMockRepository(),
+		AcademicRepo: academics.NewMockRepository(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return router
+}
+
+func TestAcademicRoutesRequireActiveMembershipAndCSRF(t *testing.T) {
+	authRepo := auth.NewMockRepository()
+	password := "a sufficiently long fictional academic test password"
+	passwordHash, err := auth.HashPassword(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	user := &auth.User{
+		ID: uuid.New(), Email: "academic-teacher@school.invalid",
+		PasswordHash: passwordHash, FullName: "Fictional Teacher", Status: auth.UserStatusActive,
+	}
+	if err := authRepo.CreateUser(t.Context(), user); err != nil {
+		t.Fatal(err)
+	}
+	academicRepo := academics.NewMockRepository()
+	academicRepo.AddMembership("school-a", uuid.New(), user.ID, "TEACHER")
+	router, err := NewRouter(RouterConfig{
+		Config: &config.Config{
+			Environment: "test", PublicWebURL: "http://localhost:3000",
+			CORSAllowedOrigins: []string{"http://localhost:3000"},
+		},
+		DB: &mockPinger{}, AuthRepo: authRepo,
+		TenantRepo: tenants.NewMockRepository(), AcademicRepo: academicRepo,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	authService := auth.NewService(authRepo)
+	_, sessionToken, csrfToken, err := authService.Login(t.Context(), user.Email, password, "127.0.0.1", "test-agent", "login")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	unauthenticated := httptest.NewRecorder()
+	router.ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/v1/tenants/school-a/academic-sessions", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("unauthenticated academic read should be rejected, status=%d", unauthenticated.Code)
+	}
+
+	getRequest := httptest.NewRequest(http.MethodGet, "/api/v1/tenants/school-a/academic-sessions", nil)
+	getRequest.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessionToken})
+	getResponse := httptest.NewRecorder()
+	router.ServeHTTP(getResponse, getRequest)
+	if getResponse.Code != http.StatusOK {
+		t.Fatalf("active school member should read academic sessions, status=%d body=%s", getResponse.Code, getResponse.Body.String())
+	}
+
+	const body = `{"name":"2026/2027","starts_on":"2026-09-01","ends_on":"2027-07-31"}`
+	post := func(includeCSRF bool) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/school-a/academic-sessions", strings.NewReader(body))
+		request.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessionToken})
+		request.Header.Set("Origin", "http://localhost:3000")
+		request.Header.Set("Content-Type", "application/json")
+		if includeCSRF {
+			request.Header.Set(auth.HeaderCSRF, csrfToken)
+		}
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, request)
+		return response
+	}
+	if response := post(false); response.Code != http.StatusForbidden {
+		t.Fatalf("academic mutation without CSRF should be rejected, status=%d body=%s", response.Code, response.Body.String())
+	}
+	if response := post(true); response.Code != http.StatusForbidden {
+		t.Fatalf("teacher must not manage academic sessions, status=%d body=%s", response.Code, response.Body.String())
+	}
+	roleEscalation := httptest.NewRequest(http.MethodPost, "/api/v1/tenants/school-a/academic-sessions",
+		strings.NewReader(`{"name":"2026/2027","starts_on":"2026-09-01","ends_on":"2027-07-31","role":"SCHOOL_OWNER","tenant_id":"`+uuid.NewString()+`"}`))
+	roleEscalation.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessionToken})
+	roleEscalation.Header.Set("Origin", "http://localhost:3000")
+	roleEscalation.Header.Set("Content-Type", "application/json")
+	roleEscalation.Header.Set(auth.HeaderCSRF, csrfToken)
+	roleEscalationResponse := httptest.NewRecorder()
+	router.ServeHTTP(roleEscalationResponse, roleEscalation)
+	if roleEscalationResponse.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("client-selected role or tenant fields must be rejected, status=%d", roleEscalationResponse.Code)
+	}
+
+	inaccessible := httptest.NewRequest(http.MethodGet, "/api/v1/tenants/school-b/academic-sessions", nil)
+	inaccessible.AddCookie(&http.Cookie{Name: auth.CookieName, Value: sessionToken})
+	inaccessibleResponse := httptest.NewRecorder()
+	router.ServeHTTP(inaccessibleResponse, inaccessible)
+	if inaccessibleResponse.Code != http.StatusNotFound {
+		t.Fatalf("cross-tenant academic lookup should be indistinguishable from missing tenant, status=%d", inaccessibleResponse.Code)
+	}
+
+	academicRepo.AddMembership("school-a", academicRepo.TenantIDs["school-a"], user.ID, "SCHOOL_OWNER")
+	if response := post(true); response.Code != http.StatusCreated {
+		t.Fatalf("school owner with valid CSRF should create academic session, status=%d body=%s", response.Code, response.Body.String())
+	}
 }

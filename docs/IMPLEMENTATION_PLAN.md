@@ -13,9 +13,12 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | [x] SWW-003H-C2 | Real frontend API readiness and component tests | Same-origin bounded readiness endpoint and accessible status states pass route/component tests | 003H-C1 |
 | [x] SWW-003H-C3 | Real-browser authentication and CSP verification | Production frontend, Go API and isolated PostgreSQL pass HTTPS cookie, auth, CSRF and browser CSP tests | 003H-C2 |
 | [x] SWW-003H-C4 | Frontend and browser CI integration | Existing Go/PostgreSQL checks remain intact; random masked CI DB credentials and frontend/browser jobs pass | 003H-C2, 003H-C3 |
-| SWW-004 | Academic year, terms, levels, subjects and teacher assignments | Structural validation, assigned permissions and tenant constraints | 003 |
-| SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004 |
-| SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004 |
+| [ ] SWW-004A | Academic session and term lifecycle API/database | Three ordered valid terms; tenant isolation; one active session; atomic audit; PostgreSQL integration and concurrency checks pass | 003 |
+| SWW-004B | Levels, classes and arms | School-configurable levels/classes with tenant-aware constraints and access tests | 004A |
+| SWW-004C | Subjects, offerings and teacher assignments | Same-tenant active teacher assignments; tenant constraints and access tests | 004B |
+| SWW-004D | Responsive academic management workflow | Server-verified school context; accessible lifecycle states; real API E2E passes | 004A, 004B, 004C |
+| SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004D |
+| SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004C |
 | SWW-007 | Teacher lessons + student reading | Published lesson available to enrolled learner only; responsive text-first UI | 005,006 |
 | SWW-008 | Assignment/submission/feedback/progress | Student submission, teacher feedback, score constraints, access tests | 007 |
 | SWW-009 | Attendance + school remote mode + notices | Attendance update logged; remote mode banner without false presence | 005,007 |
@@ -51,6 +54,10 @@ The final GitHub Actions verification passed at commit [`6301833aba7ea4275a4253a
 The first hosted attempts exposed an unsupported `ubuntu-latest` image for Playwright 1.55.1 and ambiguous password/error locators. The browser job was pinned to `ubuntu-24.04`, and the locators were narrowed without weakening assertions; the final run above passed. CI creates a fresh cryptographically random PostgreSQL password per database job and masks both the password and complete connection URI before use; GitHub Actions logs show only `***` for the database URL variables. `GITHUB_TOKEN` is not used as a database credential. The browser job uses a separately generated fictional account and disposable PostgreSQL 16; no developer, staging or production database is used.
 
 The initial dependency audit flagged PostCSS source-map/CSS-stringification advisories and a minimatch pattern-amplification advisory. Targeted overrides use PostCSS 8.5.33 under Next.js 15 and minimatch 11.0.1 for the affected ESLint parser chain; Next.js was not major-upgraded. Clean `npm ci`, lint, build and the final `npm audit` all passed, with 0 reported vulnerabilities.
+
+### SWW-004A verification (15 November 2026)
+
+`gofmt` passed for the new academics package and router changes. `go test -count=1 ./...` and `go vet ./...` passed. The focused academic unit/service tests passed, including validation, permissions, cross-tenant denial, lifecycle, term overlap and one-active-session behavior. The PostgreSQL integration test was discovered but skipped because `SWW_TEST_DATABASE_URL` is not configured on this Windows workstation; no migration was applied to the developer database. The test is mandatory in CI because the workflow sets `SWW_REQUIRE_POSTGRES_TESTS=1`. Focused race testing is blocked locally because CGO is disabled (`go test -race` reports that CGO is required). The SWW-004A checklist remains unchecked until the isolated PostgreSQL integration and concurrency tests run successfully.
 
 ## Sprint rhythm (not calendar commitments)
 
