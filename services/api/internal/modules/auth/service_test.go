@@ -355,6 +355,10 @@ func TestAuthServicePasswordReset(t *testing.T) {
 	if resetToken == "" {
 		t.Fatal("expected reset token for existing user")
 	}
+	secondResetToken, err := svc.RequestPasswordReset(ctx, "reset@school.ng", "req-2-second")
+	if err != nil || secondResetToken == "" {
+		t.Fatalf("expected second reset token for existing user, token=%q err=%v", secondResetToken, err)
+	}
 
 	// Request reset for unknown email returns empty token, no error
 	unknownToken, err := svc.RequestPasswordReset(ctx, "unknown@school.ng", "req-3")
@@ -391,6 +395,10 @@ func TestAuthServicePasswordReset(t *testing.T) {
 	err = svc.ResetPassword(ctx, resetToken, "AnotherP@ssw0rd789!", "req-7")
 	if err != ErrPasswordResetNotFound {
 		t.Errorf("expected ErrPasswordResetNotFound on token replay, got %v", err)
+	}
+	err = svc.ResetPassword(ctx, secondResetToken, "AnotherP@ssw0rd789!", "req-8-outstanding-token")
+	if err != ErrPasswordResetNotFound {
+		t.Errorf("expected ErrPasswordResetNotFound for another outstanding token, got %v", err)
 	}
 }
 

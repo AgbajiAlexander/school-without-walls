@@ -405,7 +405,11 @@ func (m *MockRepository) CompletePasswordReset(ctx context.Context, tokenHash, p
 	user.PasswordHash = passwordHash
 	user.UpdatedAt = time.Now().UTC()
 	now := time.Now().UTC()
-	reset.UsedAt = &now
+	for _, outstandingReset := range m.PasswordResets {
+		if outstandingReset.UserID == reset.UserID && outstandingReset.UsedAt == nil {
+			outstandingReset.UsedAt = &now
+		}
+	}
 	for _, session := range m.Sessions {
 		if session.UserID == reset.UserID && session.RevokedAt == nil {
 			session.RevokedAt = &now

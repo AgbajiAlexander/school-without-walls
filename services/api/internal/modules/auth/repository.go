@@ -649,9 +649,10 @@ func (r *pgRepository) CompletePasswordReset(ctx context.Context, tokenHash, pas
 		return fmt.Errorf("failed to update password: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
-		UPDATE password_resets SET used_at = CURRENT_TIMESTAMP WHERE id = $1 AND used_at IS NULL
-	`, reset.ID); err != nil {
-		return fmt.Errorf("failed to consume password reset: %w", err)
+		UPDATE password_resets SET used_at = CURRENT_TIMESTAMP
+		WHERE user_id = $1 AND used_at IS NULL
+	`, reset.UserID); err != nil {
+		return fmt.Errorf("failed to consume outstanding password resets: %w", err)
 	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP

@@ -231,6 +231,10 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 	if err != nil || token == "" {
 		t.Fatalf("expected reset token for active test account, token=%q err=%v", token, err)
 	}
+	secondToken, err := service.RequestPasswordReset(ctx, "invitee@school.invalid", "reset-test-second")
+	if err != nil || secondToken == "" {
+		t.Fatalf("expected second reset token for active test account, token=%q err=%v", secondToken, err)
+	}
 	var rawResetCount int
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM password_resets WHERE token_hash = $1`, token).Scan(&rawResetCount); err != nil || rawResetCount != 0 {
 		t.Fatalf("raw reset token must not be stored, count=%d err=%v", rawResetCount, err)
@@ -240,6 +244,9 @@ func TestPostgresAuthLifecycle(t *testing.T) {
 	}
 	if err := service.ResetPassword(ctx, token, "another updated test passphrase", "reset-replay"); !errors.Is(err, ErrPasswordResetNotFound) {
 		t.Fatalf("expected reset replay rejection, got %v", err)
+	}
+	if err := service.ResetPassword(ctx, secondToken, "second outstanding token passphrase", "reset-outstanding-token"); !errors.Is(err, ErrPasswordResetNotFound) {
+		t.Fatalf("expected other outstanding reset token to be rejected, got %v", err)
 	}
 	sessions, err = repo.ListActiveSessions(ctx, invitee.ID)
 	if err != nil || len(sessions) != 0 {
