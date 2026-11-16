@@ -27,7 +27,7 @@ func TestPostgresAcademicStructureMutations(t *testing.T) {
 	if err != nil {
 		t.Fatal("invalid PostgreSQL test URL:", err)
 	}
-	if cfg.ConnConfig.Database != "sww_structure_test" {
+	if cfg.ConnConfig.Database != "sww_structure_test" && cfg.ConnConfig.Database != "sww_ci_test" {
 		t.Fatalf("refusing mutation test on database %q", cfg.ConnConfig.Database)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
