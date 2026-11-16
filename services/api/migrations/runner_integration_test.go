@@ -82,6 +82,15 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 	}
 	defer secondPool.Close()
 
+	// Create the ledger in the temporary schema before invoking Up.
+	// Otherwise search_path may resolve the existing public ledger.
+	if _, err := adminPool.Exec(ctx, `CREATE TABLE `+schema+`.schema_migrations (
+        version VARCHAR(64) PRIMARY KEY,
+        applied_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`); err != nil {
+		t.Fatalf("create isolated migration ledger: %v", err)
+	}
+
 	runnerErrors := make(chan error, 2)
 	go func() { runnerErrors <- Up(ctx, pool) }()
 	go func() { runnerErrors <- Up(ctx, secondPool) }()
