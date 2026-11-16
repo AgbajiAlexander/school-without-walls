@@ -17,11 +17,12 @@ import (
 
 // RouterConfig holds dependencies for building the HTTP router.
 type RouterConfig struct {
-	Config       *config.Config
-	DB           db.Pinger
-	AuthRepo     auth.Repository
-	TenantRepo   tenants.Repository
-	AcademicRepo academics.Repository
+	Config        *config.Config
+	DB            db.Pinger
+	AuthRepo      auth.Repository
+	TenantRepo    tenants.Repository
+	AcademicRepo  academics.Repository
+	StructureRepo academics.StructureRepository
 }
 
 // NewRouter constructs the Chi HTTP router with standard middleware and routes.
@@ -35,7 +36,8 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
 	academicRepo := cfg.AcademicRepo
-	if authRepo != nil || tenantRepo != nil || academicRepo != nil {
+	structureRepo := cfg.StructureRepo
+	if authRepo != nil || tenantRepo != nil || academicRepo != nil || structureRepo != nil {
 		if cfg.Config.Environment != "test" {
 			return nil, fmt.Errorf("repository overrides are only allowed in the test environment")
 		}
@@ -47,6 +49,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
 			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
+			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -76,6 +79,12 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	tenantSvc := tenants.NewService(tenantRepo, invitationMailer)
 	tenantH := tenants.NewHandler(tenantSvc, captureMailer)
 	academicH := academics.NewHandler(academics.NewService(academicRepo))
+	var structureH *academics.StructureHandler
+	if structureRepo != nil {
+		structureH = academics.NewStructureHandler(
+			academics.NewStructureService(structureRepo),
+		)
+	}
 
 	// Base middleware stack
 	r.Use(middleware.Recoverer)
@@ -166,6 +175,26 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/academic-sessions/{sessionID}/terms", academicH.ConfigureTerms)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/activate", academicH.ActivateSession)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/archive", academicH.ArchiveSession)
+
+		if structureH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/grade-levels", structureH.ListGradeLevels)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/grade-levels", structureH.CreateGradeLevel)
+
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/classes", structureH.ListClasses)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/classes", structureH.CreateClass)
+
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/class-arms", structureH.ListClassArms)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/class-arms", structureH.CreateClassArm)
+
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/grade-levels/{gradeLevelID}", structureH.UpdateGradeLevel)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/grade-levels/{gradeLevelID}/archive", structureH.ArchiveGradeLevel)
+
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/classes/{classID}", structureH.UpdateClass)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/classes/{classID}/archive", structureH.ArchiveClass)
+
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/class-arms/{armID}", structureH.UpdateClassArm)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/class-arms/{armID}/archive", structureH.ArchiveClassArm)
+		}
 	})
 
 	return r, nil
