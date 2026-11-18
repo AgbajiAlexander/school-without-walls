@@ -11,6 +11,36 @@ import {
 } from "@/lib/academics-client";
 import { establishCSRFToken, type Tenant } from "@/lib/tenant-client";
 
+vi.mock("./classes-panel", () => ({
+  default: ({
+    schoolSlug,
+    canManage,
+  }: {
+    schoolSlug: string;
+    canManage: boolean;
+  }) => (
+    <div
+      data-testid="classes-panel"
+      data-school-slug={schoolSlug}
+      data-can-manage={String(canManage)}
+    />
+  ),
+}));
+vi.mock("./grade-levels-panel", () => ({
+  default: ({
+    schoolSlug,
+    canManage,
+  }: {
+    schoolSlug: string;
+    canManage: boolean;
+  }) => (
+    <div
+      data-testid="grade-levels-panel"
+      data-school-slug={schoolSlug}
+      data-can-manage={String(canManage)}
+    />
+  ),
+}));
 vi.mock("@/lib/academics-client", () => ({
   listAcademicSessions: vi.fn(),
   listAcademicTerms: vi.fn(),
@@ -797,5 +827,97 @@ describe("Academic Management dashboard", () => {
     expect(
       screen.queryByRole("button", { name: "Create draft session" }),
     ).not.toBeInTheDocument();
+  });
+
+  it("connects the Grade Levels panel to the verified school", () => {
+    render(<AcademicsClient school={school} csrfToken="fictional-csrf" />);
+
+    const panel = screen.getByTestId("grade-levels-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "demo-school");
+    expect(panel).toHaveAttribute("data-can-manage", "true");
+  });
+
+  it("passes read-only permissions for teachers", () => {
+    render(
+      <AcademicsClient
+        school={{ ...school, current_role: "TEACHER" }}
+        csrfToken="fictional-csrf"
+      />,
+    );
+
+    const panel = screen.getByTestId("grade-levels-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "demo-school");
+    expect(panel).toHaveAttribute("data-can-manage", "false");
+  });
+
+  it("uses the new school context when changing schools", () => {
+    const { rerender } = render(
+      <AcademicsClient school={school} csrfToken="fictional-csrf" />,
+    );
+
+    rerender(
+      <AcademicsClient
+        school={{
+          ...school,
+          id: "school-2",
+          slug: "other-school",
+          current_role: "TEACHER",
+        }}
+        csrfToken="fictional-csrf"
+      />,
+    );
+
+    const panel = screen.getByTestId("grade-levels-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "other-school");
+    expect(panel).toHaveAttribute("data-can-manage", "false");
+  });
+
+  it("connects Classes to the verified tenant school", () => {
+    render(<AcademicsClient school={school} csrfToken="fictional-csrf" />);
+
+    const panel = screen.getByTestId("classes-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "demo-school");
+    expect(panel).toHaveAttribute("data-can-manage", "true");
+  });
+
+  it("passes read-only permissions to Classes for teachers", () => {
+    render(
+      <AcademicsClient
+        school={{ ...school, current_role: "TEACHER" }}
+        csrfToken="fictional-csrf"
+      />,
+    );
+
+    const panel = screen.getByTestId("classes-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "demo-school");
+    expect(panel).toHaveAttribute("data-can-manage", "false");
+  });
+
+  it("updates Classes context when another school is selected", () => {
+    const { rerender } = render(
+      <AcademicsClient school={school} csrfToken="fictional-csrf" />,
+    );
+
+    rerender(
+      <AcademicsClient
+        school={{
+          ...school,
+          id: "school-2",
+          slug: "other-school",
+          current_role: "TEACHER",
+        }}
+        csrfToken="fictional-csrf"
+      />,
+    );
+
+    const panel = screen.getByTestId("classes-panel");
+
+    expect(panel).toHaveAttribute("data-school-slug", "other-school");
+    expect(panel).toHaveAttribute("data-can-manage", "false");
   });
 });

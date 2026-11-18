@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SessionCreateForm from "./session-create-form";
+import GradeLevelsPanel from "./grade-levels-panel";
+import ClassesPanel from "./classes-panel";
 import TermConfigureForm from "./term-configure-form";
 import SessionActivationControl from "./session-activation-control";
 import SessionArchiveControl from "./session-archive-control";
@@ -414,6 +416,18 @@ export default function AcademicsClient({
             </div>
           )}
         </section>
+
+        <GradeLevelsPanel
+          key={`${school.id}:${school.slug}`}
+          schoolSlug={school.slug}
+          canManage={canManage}
+        />
+
+        <ClassesPanel
+          key={`classes-${school.id}:${school.slug}`}
+          schoolSlug={school.slug}
+          canManage={canManage}
+        />
       </div>
     </main>
   );
