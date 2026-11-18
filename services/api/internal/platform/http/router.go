@@ -17,12 +17,15 @@ import (
 
 // RouterConfig holds dependencies for building the HTTP router.
 type RouterConfig struct {
-	Config        *config.Config
-	DB            db.Pinger
-	AuthRepo      auth.Repository
-	TenantRepo    tenants.Repository
-	AcademicRepo  academics.Repository
-	StructureRepo academics.StructureRepository
+	Config         *config.Config
+	DB             db.Pinger
+	AuthRepo       auth.Repository
+	TenantRepo     tenants.Repository
+	AcademicRepo   academics.Repository
+	StructureRepo  academics.StructureRepository
+	SubjectRepo    academics.SubjectRepository
+	OfferingRepo   academics.SubjectOfferingRepository
+	AssignmentRepo academics.TeacherAssignmentRepository
 }
 
 // NewRouter constructs the Chi HTTP router with standard middleware and routes.
@@ -37,7 +40,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	tenantRepo := cfg.TenantRepo
 	academicRepo := cfg.AcademicRepo
 	structureRepo := cfg.StructureRepo
-	if authRepo != nil || tenantRepo != nil || academicRepo != nil || structureRepo != nil {
+	subjectRepo := cfg.SubjectRepo
+	offeringRepo := cfg.OfferingRepo
+	assignmentRepo := cfg.AssignmentRepo
+	if authRepo != nil || tenantRepo != nil || academicRepo != nil || structureRepo != nil || subjectRepo != nil || offeringRepo != nil || assignmentRepo != nil {
 		if cfg.Config.Environment != "test" {
 			return nil, fmt.Errorf("repository overrides are only allowed in the test environment")
 		}
@@ -50,6 +56,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
 			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
+			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
+			offeringRepo = academics.NewSubjectOfferingRepository(dbWrapper.Pool)
+			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -83,6 +92,24 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	if structureRepo != nil {
 		structureH = academics.NewStructureHandler(
 			academics.NewStructureService(structureRepo),
+		)
+	}
+	var subjectH *academics.SubjectHandler
+	if subjectRepo != nil {
+		subjectH = academics.NewSubjectHandler(academics.NewSubjectService(subjectRepo))
+	}
+
+	var offeringH *academics.SubjectOfferingHandler
+	if offeringRepo != nil {
+		offeringH = academics.NewSubjectOfferingHandler(
+			academics.NewSubjectOfferingService(offeringRepo),
+		)
+	}
+
+	var assignmentH *academics.TeacherAssignmentHandler
+	if assignmentRepo != nil {
+		assignmentH = academics.NewTeacherAssignmentHandler(
+			academics.NewTeacherAssignmentService(assignmentRepo),
 		)
 	}
 
@@ -175,6 +202,24 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/academic-sessions/{sessionID}/terms", academicH.ConfigureTerms)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/activate", academicH.ActivateSession)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/archive", academicH.ArchiveSession)
+
+		if subjectH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/subjects", subjectH.ListSubjects)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/subjects", subjectH.CreateSubject)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/subjects/{subjectID}", subjectH.UpdateSubject)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/subjects/{subjectID}/archive", subjectH.ArchiveSubject)
+		}
+		if offeringH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/subject-offerings", offeringH.ListSubjectOfferings)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/subject-offerings", offeringH.CreateSubjectOffering)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/subject-offerings/{offeringID}/archive", offeringH.ArchiveSubjectOffering)
+		}
+
+		if assignmentH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teacher-assignments", assignmentH.ListTeacherAssignments)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teacher-assignments", assignmentH.CreateTeacherAssignment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teacher-assignments/{assignmentID}/deactivate", assignmentH.DeactivateTeacherAssignment)
+		}
 
 		if structureH != nil {
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/grade-levels", structureH.ListGradeLevels)
