@@ -39,6 +39,7 @@ export default function AcademicsClient({
   school: Tenant;
   csrfToken: string;
 }) {
+  const [gradeLevelsVersion, setGradeLevelsVersion] = useState(0);
   const [sessions, setSessions] = useState<AcademicSession[]>([]);
   const [selectedID, setSelectedID] = useState<string | null>(null);
   const selectedIDRef = useRef<string | null>(null);
@@ -211,7 +212,7 @@ export default function AcademicsClient({
         <div className="mt-7 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {[
             ["Sessions and terms", "Available now"],
-            ["Levels and classes", "Next implementation"],
+            ["Levels and classes", "Available now"],
             ["Subjects and offerings", "Next implementation"],
             ["Teacher assignments", "Next implementation"],
           ].map(([title, detail]) => (
@@ -418,12 +419,14 @@ export default function AcademicsClient({
         </section>
 
         <GradeLevelsPanel
+          onCreated={() => setGradeLevelsVersion((value) => value + 1)}
           key={`${school.id}:${school.slug}`}
           schoolSlug={school.slug}
           canManage={canManage}
         />
 
         <ClassesPanel
+          gradeLevelsVersion={gradeLevelsVersion}
           key={`classes-${school.id}:${school.slug}`}
           schoolSlug={school.slug}
           canManage={canManage}

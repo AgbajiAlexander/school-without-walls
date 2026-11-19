@@ -105,3 +105,8 @@ export async function updateTenantSettings(slug: string, requestBody: TenantSett
 export function establishCSRFToken(token: string): void {
   setCSRFToken(token);
 }
+
+export async function listMySchools(): Promise<Tenant[]> {
+  const result = await request<{ schools: Tenant[] }>("/api/v1/my/schools");
+  return result.schools;
+}

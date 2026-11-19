@@ -190,6 +190,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 		v1.Group(func(protected chi.Router) {
 			protected.Use(auth.RequireAuth)
+			protected.Get("/my/schools", tenantH.ListMine)
 			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
 		})

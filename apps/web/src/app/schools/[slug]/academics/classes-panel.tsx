@@ -19,11 +19,13 @@ import {
 interface Props {
   schoolSlug: string;
   canManage: boolean;
+  gradeLevelsVersion?: number;
 }
 
 export default function ClassesPanel({
   schoolSlug,
   canManage,
+  gradeLevelsVersion = 0,
 }: Props) {
   const [sessions, setSessions] = useState<AcademicSession[]>([]);
   const [levels, setLevels] = useState<GradeLevel[]>([]);
@@ -97,7 +99,7 @@ export default function ClassesPanel({
     return () => {
       cancelled = true;
     };
-  }, [schoolSlug, reloadKey]);
+  }, [schoolSlug, reloadKey, gradeLevelsVersion]);
 
   useEffect(() => {
     if (!selectedSession || initialLoading || initialError) {

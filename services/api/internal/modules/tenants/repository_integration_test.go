@@ -104,6 +104,86 @@ func TestPostgresTenantIsolationAndSettings(t *testing.T) {
 	}
 
 	repository := NewPostgresRepository(pool)
+	// database-backed member school isolation
+	schoolAList, err := repository.ListForMember(ctx, ownerAID)
+	if err != nil {
+		t.Fatalf("list school A memberships: %v", err)
+	}
+	if len(schoolAList) != 1 ||
+		schoolAList[0].Slug != "school-a" ||
+		schoolAList[0].CurrentRole != "SCHOOL_OWNER" {
+		t.Fatalf("owner A received unexpected schools: %+v", schoolAList)
+	}
+
+	schoolBList, err := repository.ListForMember(ctx, ownerBID)
+	if err != nil {
+		t.Fatalf("list school B memberships: %v", err)
+	}
+	if len(schoolBList) != 1 || schoolBList[0].Slug != "school-b" {
+		t.Fatalf("owner B received unexpected schools: %+v", schoolBList)
+	}
+
+	noMemberships, err := repository.ListForMember(ctx, adminID)
+	if err != nil {
+		t.Fatalf("list schools for user without membership: %v", err)
+	}
+	if len(noMemberships) != 0 {
+		t.Fatalf("unrelated user received schools: %+v", noMemberships)
+	}
+	// database-backed suspended membership isolation
+	if _, err := pool.Exec(ctx, `
+        UPDATE memberships
+        SET status = 'SUSPENDED'
+        WHERE tenant_id = $1 AND user_id = $2
+    `, tenantAID, ownerAID); err != nil {
+		t.Fatalf("suspend test membership: %v", err)
+	}
+
+	suspendedMembershipSchools, err := repository.ListForMember(ctx, ownerAID)
+	if err != nil || len(suspendedMembershipSchools) != 0 {
+		t.Fatalf("suspended membership disclosed schools: %+v err=%v",
+			suspendedMembershipSchools, err)
+	}
+
+	if _, err := pool.Exec(ctx, `
+        UPDATE memberships
+        SET status = 'ACTIVE'
+        WHERE tenant_id = $1 AND user_id = $2
+    `, tenantAID, ownerAID); err != nil {
+		t.Fatalf("restore test membership: %v", err)
+	}
+
+	// Database-backed suspended and archived school isolation.
+	for _, status := range []string{"SUSPENDED", "ARCHIVED"} {
+		if _, err := pool.Exec(ctx, `
+            UPDATE tenants
+            SET status = $1::tenant_status
+            WHERE id = $2
+        `, status, tenantAID); err != nil {
+			t.Fatalf("set test school status %s: %v", status, err)
+		}
+
+		hiddenSchools, err := repository.ListForMember(ctx, ownerAID)
+		if err != nil || len(hiddenSchools) != 0 {
+			t.Fatalf("school with status %s was disclosed: %+v err=%v",
+				status, hiddenSchools, err)
+		}
+	}
+
+	if _, err := pool.Exec(ctx, `
+        UPDATE tenants
+        SET status = 'ACTIVE'
+        WHERE id = $1
+    `, tenantAID); err != nil {
+		t.Fatalf("restore test school status: %v", err)
+	}
+
+	restoredSchools, err := repository.ListForMember(ctx, ownerAID)
+	if err != nil || len(restoredSchools) != 1 ||
+		restoredSchools[0].Slug != "school-a" {
+		t.Fatalf("restored school membership not visible: %+v err=%v",
+			restoredSchools, err)
+	}
 	if allowed, err := repository.IsPlatformAdmin(ctx, adminID); err != nil || !allowed {
 		t.Fatalf("database-backed platform admin should be allowed, allowed=%v err=%v", allowed, err)
 	}

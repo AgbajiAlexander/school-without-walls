@@ -10,10 +10,10 @@ import (
 )
 
 var (
-	ErrForbidden         = errors.New("tenant operation forbidden")
-	ErrNotFound          = errors.New("tenant not found")
-	ErrInvalidInput      = errors.New("invalid tenant input")
-	ErrConflict          = errors.New("tenant slug already exists")
+	ErrForbidden    = errors.New("tenant operation forbidden")
+	ErrNotFound     = errors.New("tenant not found")
+	ErrInvalidInput = errors.New("invalid tenant input")
+	ErrConflict     = errors.New("tenant slug already exists")
 )
 
 type Tenant struct {
@@ -64,6 +64,7 @@ type Repository interface {
 	CancelProvision(context.Context, uuid.UUID, uuid.UUID, *auth.AuditEvent) error
 	List(context.Context) ([]Tenant, error)
 	GetForMember(context.Context, string, uuid.UUID) (*Tenant, error)
+	ListForMember(context.Context, uuid.UUID) ([]Tenant, error)
 	UpdateSettings(context.Context, string, uuid.UUID, *SettingsRequest, *auth.AuditEvent) (*Tenant, error)
 }
 

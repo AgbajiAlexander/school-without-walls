@@ -84,6 +84,34 @@ describe("ClassesPanel", () => {
 
   afterEach(() => cleanup());
 
+  it("reloads grade levels when notified of a change", async () => {
+    const { rerender } = render(
+      <ClassesPanel
+        schoolSlug="demo-school"
+        canManage={true}
+        gradeLevelsVersion={0}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(listGradeLevels).toHaveBeenCalledWith("demo-school");
+    });
+
+    const initialCalls = vi.mocked(listGradeLevels).mock.calls.length;
+
+    rerender(
+      <ClassesPanel
+        schoolSlug="demo-school"
+        canManage={true}
+        gradeLevelsVersion={1}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(vi.mocked(listGradeLevels).mock.calls.length)
+        .toBeGreaterThan(initialCalls);
+    });
+  });
   it("lists classes only for the selected school and session", async () => {
     vi.mocked(listClasses).mockResolvedValue([schoolClass]);
 
