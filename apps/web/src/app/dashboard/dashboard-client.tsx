@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
+import MySchoolsPanel from './my-schools-panel';
 import { getMe, logout, setCSRFToken, type CurrentUser } from '@/lib/auth-client';
 
 type LoadState = 'loading' | 'ready' | 'error';
@@ -166,6 +167,8 @@ export default function DashboardClient({
 
         {logoutError && <p role="alert" className="mb-6 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700">{logoutError}</p>}
 
+        <MySchoolsPanel />
+
         {/* Cards */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           {/* Account details */}
@@ -227,7 +230,7 @@ export default function DashboardClient({
 
             <div className="mt-5 pt-4 border-t border-gray-100">
               <p className="text-xs text-gray-400">
-                Your session is verified server-side on every request. School and role dashboards will be available in a future release.
+                Your session is protected by server-side authentication. Use My Schools above to access the schools linked to your account.
               </p>
             </div>
           </div>
@@ -242,8 +245,8 @@ export default function DashboardClient({
           <div>
             <h3 className="text-sm font-semibold text-amber-800">Platform in development</h3>
             <p className="text-sm text-amber-700 mt-0.5">
-              School enrolment, tenant management, curriculum, and role-based dashboards are coming in future milestones.
-              Tenant memberships and school-specific access will be added in a future milestone.
+              Academic Management and school-specific access are available for authorized members.
+              Student enrolment, curriculum delivery, and additional role-based dashboards remain under development.
             </p>
           </div>
         </div>

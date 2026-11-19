@@ -13,6 +13,7 @@ import {
 interface Props {
   schoolSlug: string;
   canManage: boolean;
+  onCreated?: () => void;
 }
 
 const stages: { value: EducationStage; label: string }[] = [
@@ -33,6 +34,7 @@ function sortLevels(values: GradeLevel[]): GradeLevel[] {
 export default function GradeLevelsPanel({
   schoolSlug,
   canManage,
+  onCreated,
 }: Props) {
   const [levels, setLevels] = useState<GradeLevel[]>([]);
   const [loading, setLoading] = useState(true);
@@ -120,6 +122,7 @@ export default function GradeLevelsPanel({
       }
 
       setLevels((current) => sortLevels([...current, created]));
+      onCreated?.();
       setCode("");
       setName("");
       setNotice("Grade level created successfully.");
