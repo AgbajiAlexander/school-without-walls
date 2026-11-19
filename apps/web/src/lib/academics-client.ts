@@ -155,6 +155,23 @@ export function createAcademicSession(
   );
 }
 
+export function updateAcademicSession(
+  slug: string,
+  sessionID: string,
+  input: Partial<SessionInput>,
+): Promise<AcademicSession> {
+  if (!sessionID.trim()) {
+    throw new Error("An academic session identifier is required.");
+  }
+
+  return request<AcademicSession>(
+    `${schoolPath(slug)}/academic-sessions/${encodeURIComponent(sessionID)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+  );
+}
 export async function configureAcademicTerms(
   slug: string,
   sessionID: string,

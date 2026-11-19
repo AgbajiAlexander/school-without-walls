@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import SessionCreateForm from "./session-create-form";
+import SessionEditForm from "./session-edit-form";
 import GradeLevelsPanel from "./grade-levels-panel";
 import ClassesPanel from "./classes-panel";
 import TermConfigureForm from "./term-configure-form";
@@ -149,6 +150,14 @@ export default function AcademicsClient({
     selectedIDRef.current = session.id;
     setSelectedID(session.id);
     setLoadState("ready");
+  }
+
+  function handleSessionUpdated(updated: AcademicSession) {
+    setSessions((current) =>
+      current.map((session) =>
+        session.id === updated.id ? updated : session,
+      ),
+    );
   }
 
   function handleSessionActivated(updated: AcademicSession) {
@@ -322,6 +331,14 @@ export default function AcademicsClient({
                 <h3 className="text-lg font-semibold text-slate-900">
                   {selected?.name ?? "Select a session"}
                 </h3>
+                {canManage && selected?.status === "DRAFT" && (
+                  <SessionEditForm
+                    key={`${school.slug}:${selected.id}`}
+                    schoolSlug={school.slug}
+                    session={selected}
+                    onUpdated={handleSessionUpdated}
+                  />
+                )}
                 <p className="mt-1 text-sm text-slate-600">
                   Academic terms
                 </p>
