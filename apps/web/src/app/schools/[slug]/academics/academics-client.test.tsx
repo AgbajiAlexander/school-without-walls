@@ -5,6 +5,7 @@ import AcademicsClient from "./academics-client";
 import {
   listAcademicSessions,
   listAcademicTerms,
+  listSubjects,
   createAcademicSession,
   type AcademicSession,
   type AcademicTerm,
@@ -42,6 +43,10 @@ vi.mock("./grade-levels-panel", () => ({
   ),
 }));
 vi.mock("@/lib/academics-client", () => ({
+  listSubjects: vi.fn(),
+  createSubject: vi.fn(),
+  updateSubject: vi.fn(),
+  archiveSubject: vi.fn(),
   listAcademicSessions: vi.fn(),
   listAcademicTerms: vi.fn(),
   createAcademicSession: vi.fn(),
@@ -103,6 +108,7 @@ describe("Academic Management dashboard", () => {
     vi.resetAllMocks();
     vi.mocked(listAcademicSessions).mockResolvedValue([]);
     vi.mocked(listAcademicTerms).mockResolvedValue([]);
+    vi.mocked(listSubjects).mockResolvedValue([]);
   });
 
   afterEach(() => {

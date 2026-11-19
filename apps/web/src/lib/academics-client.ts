@@ -208,3 +208,77 @@ export function archiveAcademicSession(
     { method: "POST" },
   );
 }
+export interface SchoolSubject {
+  id: string;
+  code: string;
+  name: string;
+  description: string | null;
+  status: "ACTIVE" | "ARCHIVED";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SubjectInput {
+  code: string;
+  name: string;
+  description?: string | null;
+}
+
+export async function listSubjects(
+  schoolSlug: string,
+): Promise<SchoolSubject[]> {
+  const subjects = await request<SchoolSubject[]>(
+    `${schoolPath(schoolSlug)}/subjects`,
+  );
+
+  if (!Array.isArray(subjects)) {
+    throw new Error("Invalid subjects response.");
+  }
+
+  return subjects;
+}
+
+export function createSubject(
+  schoolSlug: string,
+  input: SubjectInput,
+): Promise<SchoolSubject> {
+  return request<SchoolSubject>(
+    `${schoolPath(schoolSlug)}/subjects`,
+    {
+      method: "POST",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function updateSubject(
+  schoolSlug: string,
+  subjectID: string,
+  input: Partial<SubjectInput>,
+): Promise<SchoolSubject> {
+  if (!subjectID.trim()) {
+    throw new Error("A subject identifier is required.");
+  }
+
+  return request<SchoolSubject>(
+    `${schoolPath(schoolSlug)}/subjects/${encodeURIComponent(subjectID)}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    },
+  );
+}
+
+export function archiveSubject(
+  schoolSlug: string,
+  subjectID: string,
+): Promise<SchoolSubject> {
+  if (!subjectID.trim()) {
+    throw new Error("A subject identifier is required.");
+  }
+
+  return request<SchoolSubject>(
+    `${schoolPath(schoolSlug)}/subjects/${encodeURIComponent(subjectID)}/archive`,
+    { method: "POST" },
+  );
+}
