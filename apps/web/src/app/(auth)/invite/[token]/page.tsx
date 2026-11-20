@@ -66,7 +66,7 @@ export default function AcceptInvitationPage({ params }: PageProps) {
 
     try {
       await acceptInvitation(token, fullName, password);
-      router.push(invitation?.tenant_slug
+      router.replace(invitation?.tenant_slug
         ? `/schools/${encodeURIComponent(invitation.tenant_slug)}/settings`
         : "/dashboard");
     } catch (err: unknown) {
@@ -127,7 +127,7 @@ export default function AcceptInvitationPage({ params }: PageProps) {
         </p>
         {invitation.tenant_name && (
           <p className="mt-2 text-sm text-slate-600">
-            You are joining <span className="font-semibold text-slate-800">{invitation.tenant_name}</span> as its school owner.
+            You are joining <span className="font-semibold text-slate-800">{invitation.tenant_name}</span>.
           </p>
         )}
       </div>

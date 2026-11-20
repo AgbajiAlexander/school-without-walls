@@ -39,6 +39,18 @@ export interface CapturedMessage {
   created_at: string;
 }
 
+export type StaffInvitationRole = "SCHOOL_ADMIN" | "PRINCIPAL";
+
+export function canInviteStaff(tenant: Pick<Tenant, "status" | "current_role">): boolean {
+  return tenant.status === "ACTIVE" && tenant.current_role === "SCHOOL_OWNER";
+}
+
+export function isStaffInvitationRole(role: string): role is StaffInvitationRole {
+  return role === "SCHOOL_ADMIN" || role === "PRINCIPAL";
+}
+
+type StaffInvitationResult = "sent" | "invalid" | "conflict" | "unauthenticated" | "forbidden" | "unconfirmed";
+
 interface ApiEnvelope<T> {
   data: T;
 }
@@ -50,7 +62,7 @@ interface ApiFailure {
   };
 }
 
-async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function request<T>(endpoint: string, options: RequestInit = {}, expectedStatus?: number): Promise<T> {
   const headers = new Headers(options.headers || {});
   headers.set("Accept", "application/json");
   headers.set("Content-Type", "application/json");
@@ -64,6 +76,9 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     headers,
     credentials: "same-origin",
   });
+  if (expectedStatus !== undefined && response.status !== expectedStatus) {
+    throw Object.assign(new Error("Unexpected response status"), { status: response.status });
+  }
   let payload: ApiEnvelope<T> | ApiFailure;
   try {
     payload = await response.json() as ApiEnvelope<T> | ApiFailure;
@@ -81,6 +96,39 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     throw error;
   }
   return (payload as ApiEnvelope<T>).data;
+}
+
+export async function sendStaffInvitation(
+  slug: string,
+  invitation: { email: string; role: StaffInvitationRole },
+): Promise<StaffInvitationResult> {
+  try {
+    const receipt = await request<{
+      id: string;
+      email: string;
+      role: StaffInvitationRole;
+      expires_at: string;
+    }>(`/api/v1/tenants/${encodeURIComponent(slug)}/staff-invitations`, {
+      method: "POST",
+      body: JSON.stringify({ email: invitation.email, role: invitation.role }),
+    }, 201);
+
+    return typeof receipt?.id === "string" && receipt.id.length > 0
+      && receipt.email === invitation.email.toLowerCase()
+      && receipt.role === invitation.role
+      && typeof receipt.expires_at === "string" && Number.isFinite(Date.parse(receipt.expires_at))
+      ? "sent" : "unconfirmed";
+  } catch (error: unknown) {
+    const status = error instanceof Error && "status" in error ? error.status : undefined;
+    switch (status) {
+      case 422: return "invalid";
+      case 409: return "conflict";
+      case 401: return "unauthenticated";
+      case 403:
+      case 404: return "forbidden";
+      default: return "unconfirmed";
+    }
+  }
 }
 
 export async function provisionTenant(requestBody: ProvisionTenantRequest): Promise<Tenant> {

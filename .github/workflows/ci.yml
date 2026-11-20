@@ -29,23 +29,25 @@ jobs:
         run: |
           set -euo pipefail
           database_password="$(openssl rand -hex 32)"
-          database_url="postgres://sww_ci:${database_password}@127.0.0.1:5432/sww_ci_test?sslmode=disable"
+          database_url="postgres://sww_ci:${database_password}@127.0.0.1:5432/sww_structure_test?sslmode=disable"
           echo "::add-mask::$database_password"
           echo "::add-mask::$database_url"
           printf 'SWW_TEST_DATABASE_URL=%s\n' "$database_url" >> "$GITHUB_ENV"
           export POSTGRES_PASSWORD="$database_password"
           docker run --detach --name sww-backend-postgres \
             --publish 5432:5432 \
-            --env POSTGRES_DB=sww_ci_test \
+            --env POSTGRES_DB=sww_structure_test \
             --env POSTGRES_USER=sww_ci \
             --env POSTGRES_PASSWORD \
-            --health-cmd "pg_isready -U sww_ci -d sww_ci_test" \
+            --health-cmd "pg_isready -U sww_ci -d sww_structure_test" \
             --health-interval 5s \
             --health-timeout 5s \
             --health-retries 12 \
             postgres:16
           for attempt in $(seq 1 30); do
-            if docker exec sww-backend-postgres pg_isready -U sww_ci -d sww_ci_test >/dev/null 2>&1; then
+            if docker exec sww-backend-postgres pg_isready -h 127.0.0.1 -U sww_ci -d sww_structure_test >/dev/null 2>&1; then
+              docker exec sww-backend-postgres psql -U sww_ci -d sww_structure_test -v ON_ERROR_STOP=1 \
+                -c 'CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public; CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;'
               exit 0
             fi
             sleep 2

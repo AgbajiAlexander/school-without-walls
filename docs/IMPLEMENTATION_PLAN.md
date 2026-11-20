@@ -27,6 +27,63 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-012 | Go AI gateway + teacher drafts + student tutor | No exposed secrets, age/tenant gating, human review, safety tests | 006,007 |
 | SWW-013 | E2E hardening, docs, deployment | CI/E2E/security/mobile checks; Vercel + Go HTTPS; backup restore tested | All |
 
+### SWW-004F-B9 session scope and acceptance
+
+On 20 November 2026 the project owner authorized SWW-004F-B9 on `feature/SWW-004F-subjects-offerings-assignments` ahead of the existing milestone order. Prior acceptance history and checklist entries still apply. This slice verifies the current endpoint policy: an active School Owner may invite School Administrators and Principals within their own active tenant.
+
+- [x] Verify PostgreSQL-backed HTTP authorization, conflicts, token hashing, audit, delivery recovery, staff token redemption and owner activation on isolated `sww_structure_test`. The project owner reported that Terminal 3 passed both complete staff suites with PostgreSQL required, the expiration lock-wait case five consecutive times, and the full Go regression, vet and build.
+- The staff create transaction locks the tenant and performs a non-locking lookup of existing invitations. Acceptance locks the existing invitation, tenant, user and existing memberships in that order. Staff creation inserts a new invitation row, so the reverse tenant/invitation order does not itself establish a cycle between those two paths. Owner delivery rollback locks the invitation before updating its tenant.
+- At PostgreSQL's default Read Committed isolation, the pending-token predicate and row lock arbitrate concurrent token redemption. The tenant lock serializes acceptance with tenant state updates, and existing membership locks serialize updates to rows acceptance observes. The membership uniqueness constraint protects the same tenant, user and role even when an insert races.
+- A read of existing memberships cannot lock an absent row. Future membership writers should acquire the tenant and user locks in a consistent order, especially for suspended memberships of a different role. Existing-owner authorization at issuance also reads membership status without a row lock. Cross-tenant first-time acceptance for the same email can contend on the global email constraint and fail transiently. These interleavings need coordinated database tests before claiming race safety.
+- The expiry regression confirmed that an invitation could be accepted after its deadline while waiting for the tenant lock. Acceptance now uses `clock_timestamp()` for both expiry checks, with the final check after the invitation, tenant, user and membership lock waits and before granting access.
+- Before B13, delivery happened after a redeemable token was committed. Failed revocation or concurrent redemption could leave access granted. B13 added the database delivery gate.
+
+### SWW-004F-B10 staff onboarding verification
+
+- [x] Automated backend verification. The project owner confirmed the expanded staff invitation HTTP workflow passed with PostgreSQL required in Terminal 3 against isolated `sww_structure_test`. It covers captured mail, redemption, a fresh login, dashboard membership and school API permissions, cross-school and owner-only denials, replay, expiry, and a pending second invitation after membership suspension.
+- The invitation page uses role-neutral school copy and replaces the invitation URL after successful redemption. Verification, acceptance, and authenticated mail capture responses use `Cache-Control: no-store`. See B13 for the remaining delivery and lock-order risks.
+- Local checks passed for Go regression, vet and build, 163 frontend tests, four security-header tests, frontend lint and typecheck, and the Next.js production build. The expanded PostgreSQL workflow compiled and skipped because the Codex terminal lacked `SWW_TEST_DATABASE_URL`. The workflow exercises the real API and dashboard data endpoints. The invitation page has separate component coverage.
+
+- B12 completed the local browser-level E2E journey. B13 records the delivery-risk review and remaining operational risks.
+
+### SWW-004F-B11 School Owner staff invitation interface
+
+- [x] Controlled local browser demonstration of the owner-only Invite Staff action using fictional addresses and local mail capture. See B12 evidence below.
+- The dashboard links to the selected school's invitation form. School settings verify the active membership through the API before showing the form, and the invitation endpoint rechecks authorization on submission. The form reports success only after a matching HTTP 201 receipt.
+- Frontend verification passed with 175 tests, including 12 invitation interface cases, four security-header tests, TypeScript checking, lint, and the Next.js production build.
+
+### SWW-004F-B12 controlled browser demonstration
+
+- [x] Playwright ran one complete Microsoft Edge journey with both staff roles against a production Next.js build, the real Go router, disposable PostgreSQL 18, and in-memory mail capture. Two fictional schools and all accounts were created inside the isolated fixture. The web, API, and PostgreSQL used loopback ports 13000, 18080, and 15432 respectively.
+- Edge verified one captured message per recipient, successful activation and fresh sign-in, the expected dashboard role, permitted academic session creation, cross-school and owner-only denials, and replay rejection. The owner form showed validation, duplicate invitation, authorization, session expiry, network, pending submission, and success states. An intercepted in-flight request was held while switching schools to verify that form state cleared.
+- The journey checked that the acceptance response did not echo the password, invitation token or session cookie, and that the invite URL was replaced after redemption. It also checked browser console output, browser storage and JavaScript cookie visibility for the tested invitation secrets. The fixture used local HTTP and did not exercise deployed HTTPS or SMTP behavior.
+- The browser command is `node node_modules/@playwright/test/cli.js test --config playwright.staff.config.ts` from `apps/web`. The configuration expects a production build in a separate `SWW_B12_WEB_DIR` built with `API_INTERNAL_URL=http://127.0.0.1:18080`, the matching disposable cluster on loopback port 15432, and an installed Chromium browser or `SWW_B12_BROWSER_CHANNEL=msedge`. The Go fixture creates a fresh schema and ephemeral operator for each invocation.
+- Component tests (175), TypeScript, lint, isolated production build, and Go tests, vet and build passed. The ordinary Go regression ran without the existing integration database URL. The browser fixture itself used real PostgreSQL.
+
+### SWW-004F-B13 delivery hardening and release review
+
+#### Verified acceptance
+
+- [x] New staff invitations start in `AWAITING_DELIVERY`. Verification and redemption already require `PENDING`. After the mailer reports success, a conditional update makes the invitation redeemable. Delivery-failure revocation can transition only an awaiting invitation and writes its audit event in the same transaction. Owner provisioning and existing invitation states keep their previous behavior.
+- PostgreSQL tests simulated a lost SMTP confirmation and a failed revocation transaction. The affected token remained unverifiable and unredeemable. Additional cases verified redemption versus revocation, competing confirmation and revocation, and rollback of the losing transaction after a deliberately inverted membership writer triggered a PostgreSQL deadlock.
+- All three focused PostgreSQL staff suites and the full Go regression passed with PostgreSQL required on disposable `sww_structure_test` at `127.0.0.1:15432`. Go vet and build passed. An earlier focused run on the fresh database exposed interference from shared extensions installed in temporary schemas. Preinstalling `citext` and `pgcrypto` in `public` resolved it, and backend CI now performs the same setup before testing.
+- Release review excludes generated browser artifacts, TypeScript build metadata, backups and unrelated local files. The CI workflow YAML parsed locally. Hosted CI has not run for this working tree.
+
+#### Remaining risks
+
+- An SMTP server can accept a message even if its reply or the later QUIT reply is lost. The recipient may receive an unusable link, and the application cannot recall the email or guarantee inbox delivery. If database cleanup fails, the awaiting invitation remains unusable and may block reissue until expiration. A lost response after a committed confirmation can leave a usable invitation even though the API did not return success.
+- Membership writers must lock the tenant, then the user, then membership rows when they need those locks. PostgreSQL resolves a deadlock by aborting a transaction, which can require a retry. The exercised inversion does not establish safety for every future writer.
+- Apply migration `000008_staff_invitation_delivery` before enabling the new staff creation code and drain older staff invitation writers. Existing pending staff invitations are retained, so the new delivery gate applies to newly issued invitations. B12 used loopback HTTP and local capture. Deployed HTTPS and SMTP behavior remain outside that verification.
+
+### SWW-004F-B14 release audit and rollout checkpoint
+
+- Migration `000008_staff_invitation_delivery` adds one enum value without changing existing rows, the default, or invitation constraints. The migration runner serializes migrations with a transaction advisory lock and commits the enum addition with its ledger row before application code uses the new value. Existing `PENDING` invitations and School Owner provisioning retain their behavior.
+- Disable staff invitation creation at ingress before updating any application instance, including routes that can reach an older API directly. Wait for in-flight staff sends to finish and assess any pending staff invitations issued by the older code. Apply migration 000008 and verify its ledger entry. Replace or drain every older writer, verify the hardened endpoint in staging, then reopen creation. The enum addition alone cannot prevent an older writer from inserting `PENDING`.
+- If rollout fails, keep staff creation disabled and retain the additive enum migration. Existing readers continue to require `PENDING`, so awaiting rows remain ineligible even under older readers. If recovery is needed for a stranded link, leave it to expire or use an authorized, tenant-scoped and audited revocation followed by reissue through the hardened endpoint. Evidence of email delivery is required for activation. Do not convert stranded rows to `PENDING` or remove the enum value in an emergency down migration.
+- The backend CI job uses disposable PostgreSQL 16 at loopback port 5432 with database `sww_structure_test`, mandatory integration tests, masked per-run credentials, and shared extensions installed before parallel schemas. Port 15432 is the separately guarded local test fixture and is outside hosted CI. The hosted browser job uses its own disposable database for HTTPS auth and CSP. The B12 staff invitation browser journey remains local.
+- Staff invitation formatting normalizes editable school-name whitespace before putting the name in the mail subject. A regression test covers a school name containing CRLF.
+- The proposed feature scope contains 31 source, test, migration, documentation and CI paths. Hosted CI, deployed route isolation, invitation-path log redaction at the edge, and SMTP behavior still require release verification. B14 stops before staging or committing.
+
 ### Previously recorded acceptance results
 
 The repository previously recorded successful SWW-002 and SWW-003 acceptance checks, including Go tests, PostgreSQL integration checks, migration validation and frontend checks. Their original dates were future-dated, and the underlying historical run evidence is not available in this repository; these results are therefore retained only as unverified historical claims and were not independently confirmed during SWW-003H-A.
