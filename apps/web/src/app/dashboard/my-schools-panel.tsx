@@ -30,6 +30,22 @@ export default function MySchoolsPanel() {
     };
   }, [retryKey]);
 
+  useEffect(() => {
+    const refresh = () => {
+      setLoadState("loading");
+      setRetryKey((value) => value + 1);
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
+
   return (
     <section
       aria-labelledby="my-schools-heading"

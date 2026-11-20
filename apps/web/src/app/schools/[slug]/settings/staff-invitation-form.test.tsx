@@ -6,12 +6,13 @@ import { setCSRFToken } from "@/lib/auth-client";
 import type { Tenant } from "@/lib/tenant-client";
 import SettingsClient from "./settings-client";
 
-vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 const ownerSchool: Tenant = {
   id: "school-a", slug: "school-a", name: "Fictional School A", status: "ACTIVE",
   locale: "en-NG", timezone: "Africa/Lagos", branding: {}, education_stages: ["PRIMARY"],
-  current_role: "SCHOOL_OWNER", created_at: "", updated_at: "",
+  current_role: "SCHOOL_OWNER", can_invite_staff: true, created_at: "", updated_at: "",
 };
 const email = "staff@school.invalid";
 const receipt = { data: { id: "invitation-id", email, role: "PRINCIPAL", expires_at: "2099-01-01T00:00:00Z" } };
@@ -85,6 +86,7 @@ it("offers only the two staff roles and rejects a tampered role", async () => {
 
 it.each([
   [409, "already has a pending invitation or membership"],
+  [429, "Too many staff invitations"],
   [401, "Your session has expired"],
   [403, "You do not have permission"],
   [422, "Check the email address and role"],
@@ -112,7 +114,7 @@ it("shows unconfirmed delivery after a network error and keeps the form availabl
 });
 
 it("shows the dashboard action only for an active owner and hides the form for non-owners", async () => {
-  const staffSchool: Tenant = { ...ownerSchool, id: "school-b", slug: "school-b", name: "Fictional School B", current_role: "PRINCIPAL" };
+  const staffSchool: Tenant = { ...ownerSchool, id: "school-b", slug: "school-b", name: "Fictional School B", current_role: "PRINCIPAL", can_invite_staff: false };
   const suspendedSchool: Tenant = { ...ownerSchool, id: "school-c", slug: "school-c", name: "Fictional School C", status: "SUSPENDED" };
   mockFetch().mockResolvedValue(Response.json({ data: { schools: [ownerSchool, staffSchool, suspendedSchool] } }));
   const { rerender } = render(<MySchoolsPanel />);
@@ -125,7 +127,68 @@ it("shows the dashboard action only for an active owner and hides the form for n
   expect(screen.queryByRole("heading", { name: "Invite Staff" })).toBeNull();
 });
 
-it("clears invitation state when changing schools and ignores a late receipt from the previous school", async () => {
+it("shows a multi-role owner's form based on the capability and removes it when revoked", async () => {
+  const school: Tenant = { ...ownerSchool, current_role: "PRINCIPAL" };
+  const { rerender } = render(<SettingsClient tenant={school} csrfToken="fictional-csrf" />);
+  await fillInvitation();
+  expect(screen.getByRole("heading", { name: "Invite Staff" })).toBeVisible();
+  rerender(<SettingsClient tenant={{ ...school, current_role: "SCHOOL_OWNER", can_invite_staff: false }} csrfToken="fictional-csrf" />);
+  expect(screen.queryByRole("heading", { name: "Invite Staff" })).toBeNull();
+  rerender(<SettingsClient tenant={school} csrfToken="fictional-csrf" />);
+  expect(screen.getByLabelText("Staff email address")).toHaveValue("");
+});
+
+it("invalidates access immediately and keeps submission unavailable while confirmation is delayed", async () => {
+  const fetchMock = mockFetch();
+  let complete!: (value: Response) => void;
+  fetchMock.mockResolvedValueOnce(Response.json({}, { status: 403 }))
+    .mockImplementationOnce(() => new Promise((resolve) => { complete = resolve; }))
+    .mockResolvedValueOnce(Response.json({ data: { csrf_token: "new-csrf" } }));
+  const { rerender } = render(<SettingsClient tenant={ownerSchool} csrfToken="fictional-csrf" />);
+  refresh.mockClear();
+  const user = await fillInvitation();
+  await user.click(screen.getByRole("button", { name: "Send invitation" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Verifying invitation access");
+  expect(screen.queryByRole("button", { name: "Send invitation" })).toBeNull();
+  expect(refresh).not.toHaveBeenCalled();
+  await act(async () => complete(Response.json({ data: { ...ownerSchool, can_invite_staff: false } })));
+  expect(refresh).toHaveBeenCalledTimes(1);
+  rerender(<SettingsClient tenant={{ ...ownerSchool, can_invite_staff: false }} csrfToken="fictional-csrf" />);
+  expect(screen.queryByRole("heading", { name: "Invite Staff" })).toBeNull();
+});
+
+it("keeps a failed refresh unconfirmed and renews a legitimate owner's CSRF before recovery", async () => {
+  const fetchMock = mockFetch();
+  fetchMock.mockResolvedValueOnce(Response.json({}, { status: 403 }))
+    .mockRejectedValueOnce(new Error("verification unavailable"))
+    .mockResolvedValueOnce(Response.json({ data: { csrf_token: "unused-csrf" } }))
+    .mockResolvedValueOnce(Response.json({ data: ownerSchool }))
+    .mockResolvedValueOnce(Response.json({ data: { csrf_token: "renewed-csrf" } }))
+    .mockResolvedValueOnce(Response.json(receipt, { status: 201 }));
+  render(<SettingsClient tenant={ownerSchool} csrfToken="fictional-csrf" />);
+  const user = await fillInvitation();
+  await user.click(screen.getByRole("button", { name: "Send invitation" }));
+  const retry = await screen.findByRole("button", { name: "Verify invitation access" });
+  expect(screen.queryByRole("button", { name: "Send invitation" })).toBeNull();
+  await user.click(retry);
+  await user.click(await screen.findByRole("button", { name: "Send invitation" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("Invitation sent.");
+  expect(new Headers(fetchMock.mock.calls[5][1]?.headers).get("X-CSRF-Token")).toBe("renewed-csrf");
+});
+
+it("refreshes the dashboard capability when the user returns", async () => {
+  const fetchMock = mockFetch();
+  fetchMock.mockResolvedValueOnce(Response.json({ data: { schools: [ownerSchool] } }))
+    .mockResolvedValueOnce(Response.json({ data: { schools: [{ ...ownerSchool, can_invite_staff: false }] } }));
+  render(<MySchoolsPanel />);
+  await screen.findByRole("link", { name: "Invite Staff" });
+  fireEvent.focus(window);
+  expect(await screen.findByRole("heading", { name: ownerSchool.name })).toBeVisible();
+  expect(screen.queryByRole("link", { name: "Invite Staff" })).toBeNull();
+  expect(fetchMock).toHaveBeenCalledTimes(2);
+});
+
+it.each([201, 403])("ignores an old school response with status %i after switching", async (status) => {
   const fetchMock = mockFetch();
   let complete!: (value: Response) => void;
   fetchMock.mockImplementation(() => new Promise((resolve) => { complete = resolve; }));
@@ -134,7 +197,9 @@ it("clears invitation state when changing schools and ignores a late receipt fro
   await user.click(screen.getByRole("button", { name: "Send invitation" }));
   const otherSchool = { ...ownerSchool, id: "school-b", slug: "school-b", name: "Fictional School B" };
   rerender(<SettingsClient tenant={otherSchool} csrfToken="fictional-csrf" />);
-  await act(async () => complete(Response.json(receipt, { status: 201 })));
+  refresh.mockClear();
+  await act(async () => complete(Response.json(receipt, { status })));
+  expect(refresh).not.toHaveBeenCalled();
   expect(screen.getByLabelText("Staff email address")).toHaveValue("");
   expect(screen.getByLabelText("Staff role")).toHaveValue("");
   expect(screen.queryByText("Invitation sent.")).toBeNull();

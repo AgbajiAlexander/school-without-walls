@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -30,11 +31,31 @@ func (r *postgresRepository) CreateStaffInvitation(
 		return "", ErrInvalidInput
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	// Quota and duplicate checks need fresh snapshots after the tenant lock.
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.ReadCommitted})
 	if err != nil {
 		return "", fmt.Errorf("begin staff invitation: %w", err)
 	}
 	defer tx.Rollback(ctx)
+
+	// Reject obvious denials without taking another school's issuance lock.
+	// The locked reads below remain authoritative.
+	var eligible bool
+	err = tx.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM tenants t
+			JOIN memberships m ON m.tenant_id = t.id
+			JOIN users u ON u.id = m.user_id
+			WHERE t.slug = $1::citext AND t.status = 'ACTIVE' AND m.user_id = $2
+			  AND m.role = 'SCHOOL_OWNER' AND m.status = 'ACTIVE' AND u.status = 'ACTIVE'
+		)
+	`, slug, actorID).Scan(&eligible)
+	if err != nil {
+		return "", fmt.Errorf("precheck staff invitation owner: %w", err)
+	}
+	if !eligible {
+		return "", ErrForbidden
+	}
 
 	var tenantID uuid.UUID
 	var tenantName string
@@ -53,25 +74,28 @@ func (r *postgresRepository) CreateStaffInvitation(
 		return "", fmt.Errorf("find active invitation tenant: %w", err)
 	}
 
-	var allowed bool
+	// Lock tenant -> actor -> owner membership. Status updates that win either
+	// row lock are observed here. Later updates wait for issuance to commit.
+	var lockedID uuid.UUID
 	err = tx.QueryRow(ctx, `
-        SELECT EXISTS (
-            SELECT 1
-            FROM memberships m
-            JOIN users u ON u.id = m.user_id
-            WHERE m.tenant_id = $1
-              AND m.user_id = $2
-              AND m.role = 'SCHOOL_OWNER'
-              AND m.status = 'ACTIVE'
-              AND u.status = 'ACTIVE'
-        )
-    `, tenantID, actorID).Scan(&allowed)
-
-	if err != nil {
-		return "", fmt.Errorf("authorize staff invitation: %w", err)
-	}
-	if !allowed {
+		SELECT id FROM users WHERE id = $1 AND status = 'ACTIVE' FOR SHARE
+	`, actorID).Scan(&lockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
 		return "", ErrForbidden
+	}
+	if err != nil {
+		return "", fmt.Errorf("lock staff invitation actor: %w", err)
+	}
+	err = tx.QueryRow(ctx, `
+		SELECT id FROM memberships
+		WHERE tenant_id = $1 AND user_id = $2 AND role = 'SCHOOL_OWNER' AND status = 'ACTIVE'
+		FOR SHARE
+	`, tenantID, actorID).Scan(&lockedID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrForbidden
+	}
+	if err != nil {
+		return "", fmt.Errorf("lock staff invitation owner membership: %w", err)
 	}
 
 	var conflict bool
@@ -91,7 +115,7 @@ func (r *postgresRepository) CreateStaffInvitation(
               AND i.invited_email = $2::citext
               AND i.target_role = $3
               AND i.status IN ('AWAITING_DELIVERY', 'PENDING')
-              AND i.expires_at > CURRENT_TIMESTAMP
+              AND i.expires_at > statement_timestamp()
         )
     `, tenantID, invitation.InvitedEmail, invitation.TargetRole).Scan(&conflict)
 
@@ -102,6 +126,10 @@ func (r *postgresRepository) CreateStaffInvitation(
 		return "", ErrConflict
 	}
 
+	issuedAt, err := r.checkStaffInvitationQuota(ctx, tx, tenantID, actorID, nil)
+	if err != nil {
+		return "", err
+	}
 	invitation.TenantID = &tenantID
 	invitation.CreatedBy = &actorID
 
@@ -121,6 +149,8 @@ func (r *postgresRepository) CreateStaffInvitation(
 
 	event.TenantID = &tenantID
 	event.ActorID = &actorID
+	event.Action = staffInvitationCreateAction
+	event.CreatedAt = issuedAt
 	event.SubjectType = "invitation"
 	event.SubjectID = invitation.ID.String()
 
@@ -134,6 +164,44 @@ func (r *postgresRepository) CreateStaffInvitation(
 
 	return tenantName, nil
 }
+
+// checkStaffInvitationQuota runs under the tenant lock. The issuance audit row
+// is the quota charge and commits atomically with the invitation.
+func (r *postgresRepository) checkStaffInvitationQuota(ctx context.Context, tx pgx.Tx, tenantID, actorID uuid.UUID, asOf *time.Time) (time.Time, error) {
+	limits := r.staffLimits
+	var now time.Time
+	var tenantBoundary, actorBoundary *time.Time
+	err := tx.QueryRow(ctx, `
+		WITH quota_clock AS (SELECT COALESCE($7::timestamptz, statement_timestamp()) AS now),
+		recent AS MATERIALIZED (
+			SELECT created_at, actor_id FROM audit_events CROSS JOIN quota_clock
+			WHERE tenant_id = $1 AND action = $6
+			  AND created_at > quota_clock.now - make_interval(secs => $3)
+		)
+		SELECT quota_clock.now,
+			(SELECT created_at FROM recent ORDER BY created_at DESC OFFSET $4 LIMIT 1),
+			(SELECT created_at FROM recent WHERE actor_id = $2 ORDER BY created_at DESC OFFSET $5 LIMIT 1)
+		FROM quota_clock
+	`, tenantID, actorID, limits.Window.Seconds(), limits.PerTenant-1, limits.PerActor-1, staffInvitationCreateAction, asOf).
+		Scan(&now, &tenantBoundary, &actorBoundary)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("check staff invitation quota: %w", err)
+	}
+	var retryAfter time.Duration
+	for _, boundary := range []*time.Time{tenantBoundary, actorBoundary} {
+		if boundary != nil {
+			retryAfter = max(retryAfter, boundary.Add(limits.Window).Sub(now))
+		}
+	}
+	if retryAfter > 0 {
+		return time.Time{}, &staffInvitationRateLimitError{retryAfter: retryAfter}
+	}
+	return now, nil
+}
+
+type staffInvitationRateLimitError struct{ retryAfter time.Duration }
+
+func (*staffInvitationRateLimitError) Error() string { return "staff invitation quota exceeded" }
 
 // ConfirmStaffInvitationDelivery makes a still-valid staff invitation redeemable.
 func (r *postgresRepository) ConfirmStaffInvitationDelivery(ctx context.Context, invitationID, tenantID uuid.UUID) error {

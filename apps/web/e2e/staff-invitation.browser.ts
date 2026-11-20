@@ -14,6 +14,14 @@ test.afterEach(async ({ browser }) => {
   }
 });
 
+async function withSafeFixtureDiagnostics<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new Error("Staff fixture request failed");
+  }
+}
+
 async function signIn(page: Page, email: string, password: string) {
   await page.goto("/login");
   await page.getByLabel("Email Address").fill(email);
@@ -84,10 +92,12 @@ test("fictional owners invite both staff roles and the browser enforces invitati
   const platform = await platformContext.newPage();
   const platformPassword = process.env.SWW_B12_ADMIN_PASSWORD;
   if (!platformPassword) throw new Error("Missing ephemeral fixture credential");
+  const fixtureKey = process.env.SWW_B12_FIXTURE_KEY;
+  if (!fixtureKey || fixtureKey === platformPassword) throw new Error("Missing independent fixture key");
   await signIn(platform, operator, platformPassword);
 
   const secretInConsole: boolean[] = [];
-  const protectedValues = new Set([platformPassword, ownerPassword]);
+  const protectedValues = new Set([platformPassword, ownerPassword, fixtureKey]);
   function watchConsole(page: Page) {
     page.on("console", (message) => {
       if ([...protectedValues].some((value) => message.text().includes(value))) secretInConsole.push(true);
@@ -121,7 +131,8 @@ test("fictional owners invite both staff roles and the browser enforces invitati
     return route.continue({ headers });
   }, { times: 1 });
   await owner.getByRole("button", inviteButton).click();
-  await expect(inviteAlert(owner)).toContainText("do not have permission");
+  await expect(owner.getByText("Invitation access was refreshed. Submit again to send the invitation.")).toBeVisible();
+  await expect(owner.getByRole("button", inviteButton)).toBeEnabled();
 
   await owner.route(`**${endpoint}`, (route) => route.abort(), { times: 1 });
   await owner.getByRole("button", inviteButton).click();
@@ -129,7 +140,7 @@ test("fictional owners invite both staff roles and the browser enforces invitati
 
   expect((await post(owner.context(), "/api/v1/auth/logout", {})).status()).toBe(200);
   await owner.getByRole("button", inviteButton).click();
-  await expect(inviteAlert(owner)).toContainText("session has expired");
+  await expect(owner).toHaveURL(/\/login$/);
   await signIn(owner, ownerEmail, ownerPassword);
   await owner.getByRole("article").filter({ hasText: school.name }).getByRole("link", { name: "Invite Staff" }).click();
 
@@ -210,6 +221,58 @@ test("fictional owners invite both staff roles and the browser enforces invitati
     expect(replay.status()).toBe(422);
     await staffContext.close();
   }
+  await owner.bringToFront();
+  await expect(owner.getByRole("button", inviteButton)).toBeVisible();
+  const fixtureRequest = (operation: string, email: string) => withSafeFixtureDiagnostics(() => platformContext.request.post(
+    "http://127.0.0.1:18080/__staff-fixture/owner",
+    { headers: { "X-Staff-Fixture-Key": fixtureKey }, data: { slug: school.slug, email, operation } },
+  ));
+  const fixtureURL = "http://127.0.0.1:18080/__staff-fixture/owner";
+  const unauthorized = await platformContext.request.post(fixtureURL, {
+    data: { slug: school.slug, email: ownerEmail, operation: "suspend" },
+  });
+  expect(unauthorized.status()).toBe(404);
+
+  // Model a raw Playwright transport error containing headers and verify that
+  // only the fixed diagnostic escapes the same wrapper used by the fixture.
+  let safeDiagnostic = false;
+  try {
+    await withSafeFixtureDiagnostics(async () => {
+      throw new Error(`Transport diagnostic: ${fixtureKey} ${platformPassword}`);
+    });
+  } catch (error) {
+    safeDiagnostic = error instanceof Error && error.message === "Staff fixture request failed" &&
+      !String(error.stack).includes(fixtureKey) && !String(error.stack).includes(platformPassword) && error.cause === undefined;
+  }
+  expect(safeDiagnostic).toBe(true);
+  const deniedEmail = `suspended-owner-${suffix}@school.invalid`;
+  const before = await fixtureRequest("snapshot", deniedEmail);
+  expect(before.status()).toBe(200);
+  const beforeMail = await platformContext.request.get("/api/v1/platform/mail-capture");
+  expect(beforeMail.status()).toBe(200);
+  const mailCount = (await beforeMail.json()).data.messages.length;
+  await fillInvite(owner, deniedEmail);
+  expect((await fixtureRequest("suspend", ownerEmail)).status()).toBe(204);
+  const denied = owner.waitForResponse((response) => new URL(response.url()).pathname === endpoint && response.request().method() === "POST");
+  await owner.getByRole("button", inviteButton).click();
+  expect((await denied).status()).toBe(403);
+  await expect(owner.getByRole("heading", { name: "School access unavailable" })).toBeVisible();
+  await expect(owner.getByRole("button", inviteButton)).toHaveCount(0);
+  const after = await fixtureRequest("snapshot", deniedEmail);
+  expect(after.status()).toBe(200);
+  expect(await after.json()).toEqual(await before.json());
+  const afterMail = await platformContext.request.get("/api/v1/platform/mail-capture");
+  expect(afterMail.status()).toBe(200);
+  expect((await afterMail.json()).data.messages.length).toBe(mailCount);
+  await owner.getByRole("link", { name: "Return to account" }).click();
+  await owner.getByRole("article").filter({ hasText: other.name }).getByRole("link", { name: "Invite Staff" }).click();
+  await expect(owner.getByRole("button", inviteButton)).toBeVisible();
+  await owner.getByRole("link", { name: "Account" }).click();
+  await expect(owner.getByRole("article").filter({ hasText: other.name })).toBeVisible();
+  await expect(owner.getByRole("article").filter({ hasText: school.name })).toHaveCount(0);
+  await owner.goto(`/schools/${school.slug}/settings#invite-staff`);
+  await expect(owner.getByRole("heading", { name: "School access unavailable" })).toBeVisible();
+  await expect(owner.getByRole("button", inviteButton)).toHaveCount(0);
   expect(secretInConsole.length).toBe(0);
   await platformContext.close();
 });

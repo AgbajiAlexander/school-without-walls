@@ -4,6 +4,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/school-without-walls/api/internal/platform/middleware"
@@ -50,7 +52,13 @@ func (h *StaffInvitationHandler) Create(
 	)
 
 	if err != nil {
+		var limited *staffInvitationRateLimitError
 		switch {
+		case errors.As(err, &limited):
+			seconds := int((limited.retryAfter + time.Second - 1) / time.Second)
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			apphttp.ErrorJSON(w, r, http.StatusTooManyRequests, apphttp.ErrCodeRateLimited,
+				"Staff invitation limit reached. Try again later.", map[string]any{"retry_after_seconds": seconds})
 		case errors.Is(err, ErrInvalidInput):
 			apphttp.ErrorJSON(
 				w, r, http.StatusUnprocessableEntity,

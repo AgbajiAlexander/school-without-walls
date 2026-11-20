@@ -71,6 +71,7 @@ const school: Tenant = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
   current_role: "SCHOOL_ADMIN",
+  can_manage_academics: true,
 };
 
 const firstSession: AcademicSession = {
@@ -211,6 +212,13 @@ describe("Academic Management dashboard", () => {
     expect(
       await screen.findByRole("button", { name: "Create draft session" }),
     ).toBeInTheDocument();
+  });
+
+  it("shows management controls for a Principal whose display role is Bursar", async () => {
+    const multiRoleSchool = { ...school, current_role: "BURSAR", can_manage_academics: true, can_invite_staff: false };
+    render(<AcademicsClient school={multiRoleSchool} csrfToken="fictional-csrf" />);
+    expect(await screen.findByRole("button", { name: "Create draft session" })).toBeVisible();
+    expect(screen.queryByRole("link", { name: "Invite Staff" })).toBeNull();
   });
 
   it("adds a newly created session to the dashboard", async () => {
@@ -368,7 +376,7 @@ describe("Academic Management dashboard", () => {
 
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -459,7 +467,7 @@ describe("Academic Management dashboard", () => {
 
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -720,7 +728,7 @@ describe("Academic Management dashboard", () => {
 
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -820,7 +828,7 @@ describe("Academic Management dashboard", () => {
   it("does not display the management badge to teacher accounts", async () => {
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -847,7 +855,7 @@ describe("Academic Management dashboard", () => {
   it("passes read-only permissions for teachers", () => {
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -869,7 +877,7 @@ describe("Academic Management dashboard", () => {
           ...school,
           id: "school-2",
           slug: "other-school",
-          current_role: "TEACHER",
+          current_role: "TEACHER", can_manage_academics: false,
         }}
         csrfToken="fictional-csrf"
       />,
@@ -893,7 +901,7 @@ describe("Academic Management dashboard", () => {
   it("passes read-only permissions to Classes for teachers", () => {
     render(
       <AcademicsClient
-        school={{ ...school, current_role: "TEACHER" }}
+        school={{ ...school, current_role: "TEACHER", can_manage_academics: false }}
         csrfToken="fictional-csrf"
       />,
     );
@@ -915,7 +923,7 @@ describe("Academic Management dashboard", () => {
           ...school,
           id: "school-2",
           slug: "other-school",
-          current_role: "TEACHER",
+          current_role: "TEACHER", can_manage_academics: false,
         }}
         csrfToken="fictional-csrf"
       />,

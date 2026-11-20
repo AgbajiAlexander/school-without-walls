@@ -84,6 +84,25 @@ On 20 November 2026 the project owner authorized SWW-004F-B9 on `feature/SWW-004
 - Staff invitation formatting normalizes editable school-name whitespace before putting the name in the mail subject. A regression test covers a school name containing CRLF.
 - The proposed feature scope contains 31 source, test, migration, documentation and CI paths. Hosted CI, deployed route isolation, invitation-path log redaction at the edge, and SMTP behavior still require release verification. B14 stops before staging or committing.
 
+### SWW-004F-B21 Staff Invitation review corrections
+
+- Staff issuance defaults to 10 invitations per actor per school and 25 total per school in a rolling 60-minute window. Set `STAFF_INVITATION_ACTOR_LIMIT` and `STAFF_INVITATION_TENANT_LIMIT` to integers from 1 through 1000, and `STAFF_INVITATION_WINDOW_MINUTES` from 1 through 1440. Use the same values on all API instances.
+- PostgreSQL serializes quota decisions on the tenant row. Issuance explicitly uses Read Committed so waiting requests see the previous committed charge even when the pool defaults to another isolation level. A committed creation audit event charges one issuance in both scopes using database time sampled after the authorization locks, regardless of mail outcome. Invalid, denied, duplicate and rolled-back requests do not charge quota. Duplicate conflicts retain HTTP 409. An exhausted scope returns HTTP 429 and a rounded-up retry interval covering both scopes. Keep issuance audit events throughout the configured window.
+- Issuance locks the active tenant, active issuer user, then active owner membership and holds those locks until commit. A suspension that wins the relevant lock and commits is observed and denies creation. If issuance wins and commits first, a later suspension does not retroactively cancel it. SMTP remains outside the transaction. Acceptance still locks invitation, tenant, user, membership. Issuance reads existing invitations without locking their rows. Confirmation updates only the invitation row.
+- Dashboard and settings responses expose `can_invite_staff` from all active memberships. The browser uses this capability, and the write endpoint independently enforces owner authority. No migration is needed. The B14 ingress block, writer drain and mixed-version rollout requirements still apply.
+
+### SWW-004F-B23 capability and quota boundary follow-up
+
+- Academic management is granted in school responses when an active membership is School Owner, School Admin or Principal, matching the Go academic session and term management policy. Staff invitation capability still requires an active School Owner. The existing display role remains available to clients.
+- The dashboard rechecks memberships when it regains focus or is restored from browser history. School settings refresh on entry, focus, browser history restoration, and Staff Invitation authorization denial. A discarded form cannot refresh a different school's settings.
+- Quota regressions cover exact database-time window boundaries, committed issuance after failed delivery, duplicate requests, and independent PostgreSQL pools. No migration is needed. The B14 ingress block and writer drain still apply.
+
+### SWW-004F-B25 denial handling and fixture isolation
+
+- A read-only owner precheck rejects unauthorized invitation requests before they can contend for the school's issuance row lock. The subsequent tenant, user, and owner-membership locks still determine authority. Authorized requests still take the tenant lock and can contend for database capacity. The quota bounds issuance and mail volume.
+- A denied invitation immediately disables submission. A forbidden response triggers a fresh, uncached capability and session check, scoped to the selected school. An affirmative result for the same school and a fresh CSRF token restore submission. A failed check leaves submission unavailable with a manual retry. An expired session refreshes to sign-in for the existing route. School switches abort pending checks.
+- The loopback browser fixture uses an independent ephemeral authorization key. The browser test discards raw transport diagnostics before reporting a fixture failure.
+
 ### Previously recorded acceptance results
 
 The repository previously recorded successful SWW-002 and SWW-003 acceptance checks, including Go tests, PostgreSQL integration checks, migration validation and frontend checks. Their original dates were future-dated, and the underlying historical run evidence is not available in this repository; these results are therefore retained only as unverified historical claims and were not independently confirmed during SWW-003H-A.

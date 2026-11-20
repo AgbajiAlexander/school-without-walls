@@ -55,7 +55,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	} else {
 		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
-			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+			tenantRepo = tenants.NewPostgresRepositoryWithStaffLimits(dbWrapper.Pool, cfg.Config.StaffInvitations)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
 			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
 			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
