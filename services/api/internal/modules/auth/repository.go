@@ -429,6 +429,8 @@ func (r *pgRepository) MarkInvitationUsed(ctx context.Context, id uuid.UUID) err
 }
 
 func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, invitedUser *User, password string, session *Session, event *AuditEvent) (*User, error) {
+	// Lock invitation, tenant, user, then memberships. Membership writers must
+	// acquire tenant and user locks before updating membership rows.
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to begin invitation acceptance: %w", err)
@@ -439,7 +441,7 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 	err = tx.QueryRow(ctx, `
 		SELECT id, tenant_id, invited_email, target_role, status, expires_at
 		FROM invitations
-		WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > CURRENT_TIMESTAMP
+		WHERE token_hash = $1 AND status = 'PENDING' AND expires_at > clock_timestamp()
 		FOR UPDATE
 	`, tokenHash).Scan(&invitation.ID, &invitation.TenantID, &invitation.InvitedEmail, &invitation.TargetRole, &invitation.Status, &invitation.ExpiresAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -447,6 +449,37 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to lock invitation: %w", err)
+	}
+
+	if invitation.TenantID != nil {
+		var tenantStatus string
+		err = tx.QueryRow(ctx, `
+            SELECT status::text
+            FROM tenants
+            WHERE id = $1
+            FOR UPDATE
+        `, *invitation.TenantID).Scan(&tenantStatus)
+
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvitationNotFound
+		}
+		if err != nil {
+			return nil, fmt.Errorf("lock invited tenant status: %w", err)
+		}
+
+		switch invitation.TargetRole {
+		case "SCHOOL_OWNER":
+			if tenantStatus != "PENDING_SETUP" {
+				return nil, ErrInvitationNotFound
+			}
+		case "SCHOOL_ADMIN", "PRINCIPAL", "TEACHER",
+			"STUDENT", "PARENT", "BURSAR":
+			if tenantStatus != "ACTIVE" {
+				return nil, ErrInvitationNotFound
+			}
+		default:
+			return nil, ErrInvitationNotFound
+		}
 	}
 
 	var user User
@@ -503,6 +536,51 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 	default:
 		return nil, fmt.Errorf("failed to find invited user: %w", err)
 	}
+	if invitation.TenantID != nil {
+		// Lock existing memberships to prevent suspended access
+		// or duplicate role grants during invitation acceptance.
+		rows, err := tx.Query(ctx, `
+            SELECT role, status::text
+            FROM memberships
+            WHERE tenant_id = $1 AND user_id = $2
+            FOR UPDATE
+        `, *invitation.TenantID, user.ID)
+		if err != nil {
+			return nil, fmt.Errorf("check existing invitation membership: %w", err)
+		}
+
+		blocked := false
+		for rows.Next() {
+			var existingRole, existingStatus string
+			if err := rows.Scan(&existingRole, &existingStatus); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("scan invited membership: %w", err)
+			}
+			if existingRole == invitation.TargetRole ||
+				existingStatus == "SUSPENDED" {
+				blocked = true
+			}
+		}
+		rowErr := rows.Err()
+		rows.Close()
+		if rowErr != nil {
+			return nil, fmt.Errorf("read invited memberships: %w", rowErr)
+		}
+		if blocked {
+			return nil, ErrInvitationNotFound
+		}
+	}
+
+	// The invitation may have expired while waiting for a row lock.
+	// Check the database wall clock again before granting access.
+	var unexpired bool
+	if err := tx.QueryRow(ctx, `SELECT $1::timestamptz > clock_timestamp()`, invitation.ExpiresAt).Scan(&unexpired); err != nil {
+		return nil, fmt.Errorf("recheck invitation expiration: %w", err)
+	}
+	if !unexpired {
+		return nil, ErrInvitationNotFound
+	}
+
 	session.UserID = user.ID
 	if invitation.TenantID != nil {
 		if _, err := tx.Exec(ctx, `

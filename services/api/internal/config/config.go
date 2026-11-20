@@ -13,6 +13,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+type StaffInvitationLimits struct {
+	PerActor  int
+	PerTenant int
+	Window    time.Duration
+}
+
+func DefaultStaffInvitationLimits() StaffInvitationLimits {
+	return StaffInvitationLimits{PerActor: 10, PerTenant: 25, Window: time.Hour}
+}
+
 // Config holds all backend runtime configuration.
 type Config struct {
 	Port               int
@@ -30,6 +40,7 @@ type Config struct {
 	SMTPPassword       string
 	SMTPFrom           string
 	ShutdownTimeout    time.Duration
+	StaffInvitations   StaffInvitationLimits
 }
 
 // Load loads configuration from environment variables with defaults for
@@ -120,6 +131,10 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("SMTP_USERNAME and SMTP_PASSWORD must be configured together")
 	}
 
+	limits, err := loadStaffInvitationLimits()
+	if err != nil {
+		return nil, err
+	}
 	return &Config{
 		Port:               port,
 		Environment:        env,
@@ -136,7 +151,32 @@ func Load() (*Config, error) {
 		SMTPPassword:       smtpPassword,
 		SMTPFrom:           smtpFrom,
 		ShutdownTimeout:    10 * time.Second,
+		StaffInvitations:   limits,
 	}, nil
+}
+
+func loadStaffInvitationLimits() (StaffInvitationLimits, error) {
+	defaults := DefaultStaffInvitationLimits()
+	read := func(name string, fallback, max int) (int, error) {
+		n, err := strconv.Atoi(getEnv(name, strconv.Itoa(fallback)))
+		if err != nil || n < 1 || n > max {
+			return 0, fmt.Errorf("%s must be an integer between 1 and %d", name, max)
+		}
+		return n, nil
+	}
+	actor, err := read("STAFF_INVITATION_ACTOR_LIMIT", defaults.PerActor, 1000)
+	if err != nil {
+		return StaffInvitationLimits{}, err
+	}
+	tenant, err := read("STAFF_INVITATION_TENANT_LIMIT", defaults.PerTenant, 1000)
+	if err != nil {
+		return StaffInvitationLimits{}, err
+	}
+	minutes, err := read("STAFF_INVITATION_WINDOW_MINUTES", int(defaults.Window/time.Minute), 1440)
+	if err != nil {
+		return StaffInvitationLimits{}, err
+	}
+	return StaffInvitationLimits{PerActor: actor, PerTenant: tenant, Window: time.Duration(minutes) * time.Minute}, nil
 }
 
 func splitList(value string) []string {

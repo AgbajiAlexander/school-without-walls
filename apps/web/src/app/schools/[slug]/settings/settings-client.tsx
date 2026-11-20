@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { establishCSRFToken, updateTenantSettings } from "@/lib/tenant-client";
+import { canInviteStaff, establishCSRFToken, updateTenantSettings } from "@/lib/tenant-client";
 import type { Tenant } from "@/lib/tenant-client";
+import StaffInvitationForm from "./staff-invitation-form";
 
 const stages = [
   { value: "EARLY_YEARS", label: "Early years" },
@@ -15,7 +16,7 @@ const stages = [
 ];
 
 export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; csrfToken: string }) {
-  const router = useRouter();
+  const { refresh } = useRouter();
   const [name, setName] = useState(tenant.name);
   const [locale, setLocale] = useState(tenant.locale);
   const [timezone, setTimezone] = useState(tenant.timezone);
@@ -27,6 +28,19 @@ export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; 
   useEffect(() => {
     establishCSRFToken(csrfToken);
   }, [csrfToken]);
+
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, [refresh, tenant.id]);
 
   function toggleStage(stage: string) {
     setSelectedStages((current) => current.includes(stage)
@@ -48,7 +62,7 @@ export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; 
         education_stages: selectedStages,
       });
       setNotice("School settings saved.");
-      router.refresh();
+      refresh();
     } catch (requestError: unknown) {
       setError(requestError instanceof Error ? requestError.message : "Unable to save school settings.");
     } finally {
@@ -118,6 +132,7 @@ export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; 
             </button>
           </form>
         </section>
+        {canInviteStaff(tenant) && <StaffInvitationForm key={tenant.id} schoolId={tenant.id} schoolSlug={tenant.slug} onAuthorizationDenied={refresh} />}
       </div>
     </main>
   );

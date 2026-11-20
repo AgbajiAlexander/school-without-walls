@@ -53,7 +53,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	} else {
 		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
-			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+			tenantRepo = tenants.NewPostgresRepositoryWithStaffLimits(dbWrapper.Pool, cfg.Config.StaffInvitations)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
 			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
 			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
@@ -87,6 +87,16 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	authH = auth.NewHandler(authSvc, isSecure, mailer, trustedProxyNets)
 	tenantSvc := tenants.NewService(tenantRepo, invitationMailer)
 	tenantH := tenants.NewHandler(tenantSvc, captureMailer)
+	// Staff-specific invitations use the existing tenant repository
+	// and the configured SMTP or local capture mailer.
+	var staffInvitationH *tenants.StaffInvitationHandler
+	if staffRepo, ok := tenantRepo.(tenants.StaffInvitationRepository); ok {
+		if staffMailer, ok := invitationMailer.(tenants.StaffInvitationMailer); ok {
+			staffInvitationH = tenants.NewStaffInvitationHandler(
+				tenants.NewStaffInvitationService(staffRepo, staffMailer),
+			)
+		}
+	}
 	academicH := academics.NewHandler(academics.NewService(academicRepo))
 	var structureH *academics.StructureHandler
 	if structureRepo != nil {
@@ -193,6 +203,12 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			protected.Get("/my/schools", tenantH.ListMine)
 			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
+			if staffInvitationH != nil {
+				protected.With(auth.RequireCSRF(authSvc)).Post(
+					"/tenants/{slug}/staff-invitations",
+					staffInvitationH.Create,
+				)
+			}
 		})
 
 		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions", academicH.ListSessions)

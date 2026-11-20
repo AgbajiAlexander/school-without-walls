@@ -3,6 +3,7 @@ package config
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestConfigLoadDefaultsRequireExplicitDatabaseURL(t *testing.T) {
@@ -97,6 +98,26 @@ func TestConfigRejectsInvalidDatabaseURLsWithoutEchoingThem(t *testing.T) {
 	}
 }
 
+func TestStaffInvitationLimits(t *testing.T) {
+	setDefaultTestEnvironment(t)
+	t.Setenv("DATABASE_URL", "postgres://localhost/sww_test")
+	cfg, err := Load()
+	if err != nil || cfg.StaffInvitations != (StaffInvitationLimits{PerActor: 10, PerTenant: 25, Window: time.Hour}) {
+		t.Fatalf("unexpected default staff limits: %v", err)
+	}
+	t.Setenv("STAFF_INVITATION_ACTOR_LIMIT", "3")
+	t.Setenv("STAFF_INVITATION_TENANT_LIMIT", "7")
+	t.Setenv("STAFF_INVITATION_WINDOW_MINUTES", "15")
+	cfg, err = Load()
+	if err != nil || cfg.StaffInvitations != (StaffInvitationLimits{PerActor: 3, PerTenant: 7, Window: 15 * time.Minute}) {
+		t.Fatalf("unexpected custom staff limits: %v", err)
+	}
+	t.Setenv("STAFF_INVITATION_ACTOR_LIMIT", "0")
+	if _, err := Load(); err == nil {
+		t.Fatal("zero quota must fail closed")
+	}
+}
+
 func setDefaultTestEnvironment(t *testing.T) {
 	t.Helper()
 	for key, value := range map[string]string{
@@ -105,6 +126,7 @@ func setDefaultTestEnvironment(t *testing.T) {
 		"CORS_ALLOWED_ORIGINS": "", "TRUSTED_PROXY_CIDRS": "",
 		"PUBLIC_WEB_URL": "", "SMTP_HOST": "", "SMTP_PORT": "",
 		"SMTP_USERNAME": "", "SMTP_PASSWORD": "", "SMTP_FROM": "",
+		"STAFF_INVITATION_ACTOR_LIMIT": "", "STAFF_INVITATION_TENANT_LIMIT": "", "STAFF_INVITATION_WINDOW_MINUTES": "",
 	} {
 		t.Setenv(key, value)
 	}

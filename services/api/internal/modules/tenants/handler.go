@@ -86,6 +86,7 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) CapturedMail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	if h.captureMailer == nil {
 		apphttp.ErrorJSON(w, r, http.StatusNotFound, apphttp.ErrCodeNotFound, "Resource not found", nil)
 		return

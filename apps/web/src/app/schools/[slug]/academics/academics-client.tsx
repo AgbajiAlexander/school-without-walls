@@ -185,9 +185,7 @@ export default function AcademicsClient({
 
   const selected = sessions.find((item) => item.id === selectedID);
 
-  const canManage = ["SCHOOL_OWNER", "SCHOOL_ADMIN", "PRINCIPAL"].includes(
-    school.current_role ?? "",
-  );
+  const canManage = school.can_manage_academics === true;
 
   return (
     <main className="min-h-screen bg-slate-50">
