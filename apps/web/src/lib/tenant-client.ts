@@ -14,6 +14,8 @@ export interface Tenant {
   created_at: string;
   updated_at: string;
   current_role?: string;
+  can_invite_staff?: boolean;
+  can_manage_academics?: boolean;
 }
 
 export interface ProvisionTenantRequest {
@@ -41,15 +43,15 @@ export interface CapturedMessage {
 
 export type StaffInvitationRole = "SCHOOL_ADMIN" | "PRINCIPAL";
 
-export function canInviteStaff(tenant: Pick<Tenant, "status" | "current_role">): boolean {
-  return tenant.status === "ACTIVE" && tenant.current_role === "SCHOOL_OWNER";
+export function canInviteStaff(tenant: Pick<Tenant, "status" | "can_invite_staff">): boolean {
+  return tenant.status === "ACTIVE" && tenant.can_invite_staff === true;
 }
 
 export function isStaffInvitationRole(role: string): role is StaffInvitationRole {
   return role === "SCHOOL_ADMIN" || role === "PRINCIPAL";
 }
 
-type StaffInvitationResult = "sent" | "invalid" | "conflict" | "unauthenticated" | "forbidden" | "unconfirmed";
+type StaffInvitationResult = "sent" | "invalid" | "conflict" | "unauthenticated" | "forbidden" | "unconfirmed" | "rate-limited";
 
 interface ApiEnvelope<T> {
   data: T;
@@ -121,6 +123,7 @@ export async function sendStaffInvitation(
   } catch (error: unknown) {
     const status = error instanceof Error && "status" in error ? error.status : undefined;
     switch (status) {
+      case 429: return "rate-limited";
       case 422: return "invalid";
       case 409: return "conflict";
       case 401: return "unauthenticated";
@@ -129,6 +132,15 @@ export async function sendStaffInvitation(
       default: return "unconfirmed";
     }
   }
+}
+
+export async function verifyStaffInvitationAccess(slug: string, signal: AbortSignal) {
+  const options = { cache: "no-store" as const, signal };
+  const [school, session] = await Promise.all([
+    request<Tenant>(`/api/v1/tenants/${encodeURIComponent(slug)}/settings`, options, 200),
+    request<{ csrf_token: string }>("/api/v1/auth/me", options, 200),
+  ]);
+  return { school, csrfToken: session?.csrf_token };
 }
 
 export async function provisionTenant(requestBody: ProvisionTenantRequest): Promise<Tenant> {

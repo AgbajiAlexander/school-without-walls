@@ -178,6 +178,15 @@ func TestStaffInvitationService(t *testing.T) {
 		}
 	})
 
+	t.Run("quota rejection never calls the mailer", func(t *testing.T) {
+		service, repo, mailer := newService()
+		repo.createErr = &staffInvitationRateLimitError{retryAfter: time.Minute}
+		result, err := service.InviteStaff(context.Background(), actorID, "morfol-demo", request, "quota")
+		var limited *staffInvitationRateLimitError
+		if result != nil || !errors.As(err, &limited) || mailer.calls != 0 || repo.confirmCalls != 0 || repo.revokeCalls != 0 {
+			t.Fatal("quota rejection must return before delivery")
+		}
+	})
 	t.Run("delivery failure revokes invitation", func(t *testing.T) {
 		service, repo, mailer := newService()
 		mailer.sendErr = errors.New("mail delivery failure")

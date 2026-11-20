@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -83,6 +84,18 @@ func staffHTTPTestPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+func newStaffTestRouter(t *testing.T, pool *pgxpool.Pool, origin, webURL string, limits config.StaffInvitationLimits) http.Handler {
+	t.Helper()
+	handler, err := NewRouter(RouterConfig{
+		Config: &config.Config{Environment: "test", PublicWebURL: webURL, CORSAllowedOrigins: []string{origin}, StaffInvitations: limits},
+		DB:     &db.DB{Pool: pool},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return handler
+}
+
 func TestPostgresStaffInvitationHTTP(t *testing.T) {
 	pool := staffHTTPTestPool(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
@@ -129,16 +142,10 @@ func TestPostgresStaffInvitationHTTP(t *testing.T) {
 	exec("INSERT INTO platform_admins (user_id) VALUES ($1)", ids["platform"])
 	const origin = "http://localhost:3000"
 	newRouter := func(webURL string) http.Handler {
-		t.Helper()
-		handler, err := NewRouter(RouterConfig{
-			Config: &config.Config{Environment: "test", PublicWebURL: webURL, CORSAllowedOrigins: []string{origin}},
-			DB:     &db.DB{Pool: pool},
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		return handler
+		return newStaffTestRouter(t, pool, origin, webURL, config.StaffInvitationLimits{})
 	}
+	// Construct a separate API instance over the same authoritative database.
+	limitedRouter := newStaffTestRouter(t, pool, origin, origin, config.StaffInvitationLimits{PerActor: 1, PerTenant: 2, Window: time.Hour})
 	router := newRouter(origin)
 	send := func(handler http.Handler, method, path, body string, cred credentials) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(ctx)
@@ -223,6 +230,35 @@ func TestPostgresStaffInvitationHTTP(t *testing.T) {
 			t.Fatal("rejected invitation request had side effects")
 		}
 	}
+	t.Run("authenticated non-owner denial does not wait on the school lock", func(t *testing.T) {
+		before := snapshot(t)
+		mailBefore := len(messages(t, router))
+		blocker, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer blocker.Rollback(ctx)
+		if _, err := blocker.Exec(ctx, "SELECT id FROM tenants WHERE id=$1 FOR UPDATE", tenantB); err != nil {
+			t.Fatal(err)
+		}
+		result := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			result <- send(router, "POST", otherPath, body("staff-lock-denied@school.invalid", "PRINCIPAL"), actors["owner"])
+		}()
+		wait, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		select {
+		case response := <-result:
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d", response.Code)
+			}
+		case <-wait.Done():
+			t.Fatal("non-owner was blocked by the other school's row lock")
+		}
+		if snapshot(t) != before || len(messages(t, router)) != mailBefore {
+			t.Fatal("denied request performed an issuance side effect")
+		}
+	})
 	valid := body("new-staff@school.invalid", "SCHOOL_ADMIN")
 	for _, tc := range []struct {
 		name, path, body string
@@ -453,6 +489,19 @@ func TestPostgresStaffInvitationHTTP(t *testing.T) {
 			}
 		})
 	}
+	t.Run("over-limit browser request creates neither invitation audit nor captured mail", func(t *testing.T) {
+		before := snapshot(t)
+		const recipient = "staff-over-limit@school.invalid"
+		res := send(limitedRouter, "POST", path, body(recipient, "PRINCIPAL"), actors["owner"])
+		retry, err := strconv.Atoi(res.Header().Get("Retry-After"))
+		if res.Code != 429 || err != nil || retry < 1 || retry > 3600 ||
+			!strings.Contains(res.Body.String(), "retry_after_seconds") || strings.Contains(res.Body.String(), recipient) {
+			t.Fatalf("invalid quota response, status %d", res.Code)
+		}
+		if snapshot(t) != before || len(messages(t, limitedRouter)) != 0 {
+			t.Fatal("over-limit request performed an issuance side effect")
+		}
+	})
 	t.Run("owner provisioning and activation", func(t *testing.T) {
 		before := len(messages(t, router))
 		res := send(router, "POST", "/api/v1/platform/tenants",

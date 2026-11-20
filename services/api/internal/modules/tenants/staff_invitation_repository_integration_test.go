@@ -3,6 +3,7 @@ package tenants
 import (
 	"context"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/auth"
 )
 
@@ -166,6 +168,266 @@ func TestPostgresStaffInvitationRepository(t *testing.T) {
 			RequestID:        uuid.NewString(),
 			MetadataRedacted: map[string]any{},
 		}
+	}
+
+	t.Run("active owner capability includes multi-role owners only once", func(t *testing.T) {
+		must(`INSERT INTO memberships (id, tenant_id, user_id, role, status)
+			VALUES ($1,$3,$4,'PRINCIPAL','ACTIVE'), ($2,$3,$5,'PRINCIPAL','ACTIVE')`,
+			uuid.New(), uuid.New(), tenantA, ownerA, suspendedOwner)
+		must(`INSERT INTO memberships (id, tenant_id, user_id, role, status)
+			VALUES ($1,$4,$5,'BURSAR','ACTIVE'), ($2,$4,$6,'BURSAR','ACTIVE'),
+			($3,$4,$6,'PRINCIPAL','SUSPENDED')`, uuid.New(), uuid.New(), uuid.New(), tenantA, existingPrincipal, teacher)
+		for _, tc := range []struct {
+			actor          uuid.UUID
+			role           string
+			invite, manage bool
+		}{
+			{ownerA, "PRINCIPAL", true, true},
+			{suspendedOwner, "PRINCIPAL", false, true},
+			{existingPrincipal, "BURSAR", false, true},
+			{teacher, "BURSAR", false, false},
+		} {
+			school, err := repo.GetForMember(ctx, "staff-test-a", tc.actor)
+			if err != nil || school.CurrentRole != tc.role || school.CanInviteStaff != tc.invite || school.CanManageAcademics != tc.manage {
+				t.Fatalf("unexpected school capability: %v", err)
+			}
+			schools, err := repo.ListForMember(ctx, tc.actor)
+			if err != nil || len(schools) != 1 || schools[0].ID != tenantA || schools[0].CanInviteStaff != tc.invite || schools[0].CanManageAcademics != tc.manage {
+				t.Fatalf("unexpected dashboard capability: %v", err)
+			}
+		}
+		if _, err := repo.GetForMember(ctx, "staff-test-b", ownerA); !errors.Is(err, ErrNotFound) {
+			t.Fatal("multi-role owner was able to read another school")
+		}
+	})
+
+	t.Run("quota window uses an exclusive lower boundary", func(t *testing.T) {
+		boundaryTenant := uuid.New()
+		must(`INSERT INTO tenants (id,slug,name,status) VALUES ($1,'quota-boundary','Quota Boundary','ACTIVE')`, boundaryTenant)
+		limited := NewPostgresRepositoryWithStaffLimits(pool, config.StaffInvitationLimits{PerActor: 1, PerTenant: 1, Window: time.Hour}).(*postgresRepository)
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		var now time.Time
+		if err := tx.QueryRow(ctx, `SELECT statement_timestamp() FROM tenants WHERE id=$1 FOR UPDATE`, boundaryTenant).Scan(&now); err != nil {
+			t.Fatal(err)
+		}
+		id := uuid.New()
+		for _, tc := range []struct {
+			name    string
+			offset  time.Duration
+			blocked bool
+		}{
+			{"just inside", time.Microsecond, true},
+			{"exact lower boundary", 0, false},
+			{"just outside", -time.Microsecond, false},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				if _, err := tx.Exec(ctx, `INSERT INTO audit_events
+					(id, tenant_id, actor_id, action, subject_type, subject_id, request_id, created_at)
+					VALUES ($1,$2,$3,$4,'invitation','fixture','fixture',$5)
+					ON CONFLICT (id) DO UPDATE SET created_at = EXCLUDED.created_at`,
+					id, boundaryTenant, ownerA, staffInvitationCreateAction, now.Add(-time.Hour+tc.offset)); err != nil {
+					t.Fatal(err)
+				}
+				_, err := limited.checkStaffInvitationQuota(ctx, tx, boundaryTenant, ownerA, &now)
+				var rejected *staffInvitationRateLimitError
+				if tc.blocked {
+					if !errors.As(err, &rejected) || rejected.retryAfter != time.Microsecond {
+						t.Fatalf("inside issuance did not consume quota: %v", err)
+					}
+				} else if err != nil {
+					t.Fatalf("issuance at or outside the boundary consumed quota: %v", err)
+				}
+			})
+		}
+	})
+
+	t.Run("failed delivery charges quota and duplicates do not", func(t *testing.T) {
+		school := uuid.New()
+		must(`INSERT INTO tenants (id,slug,name,status) VALUES ($1,'quota-delivery','Quota Delivery','ACTIVE')`, school)
+		must(`INSERT INTO memberships (id,tenant_id,user_id,role,status) VALUES ($1,$2,$3,'SCHOOL_OWNER','ACTIVE')`, uuid.New(), school, ownerA)
+		limited := NewPostgresRepositoryWithStaffLimits(pool, config.StaffInvitationLimits{PerActor: 2, PerTenant: 2, Window: time.Hour}).(*postgresRepository)
+		var sends int
+		failDelivery := false
+		service := NewStaffInvitationService(limited, staffTestMailer(func(context.Context, string) error {
+			sends++
+			if failDelivery {
+				return errors.New("fictional delivery failure")
+			}
+			return nil
+		}))
+		issue := func(email string) error {
+			_, err := service.InviteStaff(ctx, ownerA, "quota-delivery", StaffInvitationRequest{Email: email, Role: "PRINCIPAL"}, uuid.NewString())
+			return err
+		}
+		const first = "quota-confirmed@school.invalid"
+		if err := issue(first); err != nil {
+			t.Fatal(err)
+		}
+		if err := issue(first); !errors.Is(err, ErrConflict) {
+			t.Fatalf("duplicate: %v", err)
+		}
+		failDelivery = true
+		if err := issue("quota-failed@school.invalid"); err == nil || sends != 2 {
+			t.Fatalf("expected second issuance to attempt delivery despite duplicate: %v", err)
+		}
+		var rejected *staffInvitationRateLimitError
+		if err := issue("quota-blocked@school.invalid"); !errors.As(err, &rejected) || sends != 2 {
+			t.Fatalf("expected failed delivery to retain quota without another send: %v", err)
+		}
+		var revoked, charges int
+		if err := pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM invitations WHERE tenant_id=$1 AND status='REVOKED'),
+			(SELECT count(*) FROM audit_events WHERE tenant_id=$1 AND action=$2)`,
+			school, staffInvitationCreateAction).Scan(&revoked, &charges); err != nil || revoked != 1 || charges != 2 {
+			t.Fatalf("unexpected revoked=%d charges=%d: %v", revoked, charges, err)
+		}
+	})
+
+	t.Run("concurrent distinct recipients respect actor and tenant quotas across repositories", func(t *testing.T) {
+		limitedTenant := uuid.New()
+		must(`INSERT INTO tenants (id,slug,name,status) VALUES ($1,'quota-test','Test Quota School','ACTIVE')`, limitedTenant)
+		for _, actor := range []uuid.UUID{ownerA, ownerB} {
+			must(`INSERT INTO memberships (id,tenant_id,user_id,role,status) VALUES ($1,$2,$3,'SCHOOL_OWNER','ACTIVE')`, uuid.New(), limitedTenant, actor)
+		}
+		limits := config.StaffInvitationLimits{PerActor: 2, PerTenant: 3, Window: time.Hour}
+		otherConfig := cfg.Copy()
+		otherConfig.ConnConfig.RuntimeParams["default_transaction_isolation"] = "repeatable read"
+		otherPool, err := pgxpool.NewWithConfig(ctx, otherConfig)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer otherPool.Close()
+		instances := []*postgresRepository{
+			NewPostgresRepositoryWithStaffLimits(pool, limits).(*postgresRepository),
+			NewPostgresRepositoryWithStaffLimits(otherPool, limits).(*postgresRepository),
+		}
+		issueConcurrently := func(actor uuid.UUID, prefix string, want int) {
+			t.Helper()
+			start := make(chan struct{})
+			results := make(chan error, 8)
+			for i := range 8 {
+				go func() {
+					<-start
+					inv := newInvitation(fmt.Sprintf("%s-%d@school.invalid", prefix, i), "PRINCIPAL")
+					_, err := instances[i%len(instances)].CreateStaffInvitation(ctx, "quota-test", actor, inv, newEvent())
+					results <- err
+				}()
+			}
+			close(start)
+			issued := 0
+			for range 8 {
+				err := <-results
+				if err == nil {
+					issued++
+					continue
+				}
+				var limited *staffInvitationRateLimitError
+				if !errors.As(err, &limited) || limited.retryAfter <= 0 || limited.retryAfter > time.Hour {
+					t.Errorf("unexpected error for distinct recipient: %v", err)
+				}
+			}
+			if issued != want {
+				t.Fatalf("issued %d invitations, want %d", issued, want)
+			}
+		}
+		issueConcurrently(ownerA, "quota-actor", 2)
+		issueConcurrently(ownerB, "quota-school", 1)
+		var count, audited int
+		if err := pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM invitations WHERE tenant_id=$1),
+			(SELECT count(*) FROM audit_events WHERE tenant_id=$1 AND action=$2)`,
+			limitedTenant, staffInvitationCreateAction).Scan(&count, &audited); err != nil || count != 3 || audited != 3 {
+			t.Fatalf("quota losers left issuance side effects: invitations=%d audits=%d error=%v", count, audited, err)
+		}
+		if _, err := instances[0].CreateStaffInvitation(ctx, "staff-test-b", ownerB, newInvitation("quota-other-tenant@school.invalid", "PRINCIPAL"), newEvent()); err != nil {
+			t.Fatalf("quota leaked into another school: %v", err)
+		}
+		must(`UPDATE audit_events SET created_at=clock_timestamp() - interval '2 hours' WHERE tenant_id=$1`, limitedTenant)
+		issueConcurrently(ownerA, "quota-next-window", 2)
+	})
+
+	for _, tc := range []struct {
+		table, update string
+		args          []any
+	}{
+		{"memberships", `UPDATE memberships SET status='SUSPENDED' WHERE tenant_id=$1 AND user_id=$2 AND role='SCHOOL_OWNER'`, []any{tenantA, ownerA}},
+		{"users", `UPDATE users SET status='SUSPENDED' WHERE id=$1`, []any{ownerA}},
+	} {
+		t.Run("issuer suspension during issuance/"+tc.table, func(t *testing.T) {
+			waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel()
+			blocker, err := pool.Begin(waitCtx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer blocker.Rollback(ctx)
+			if _, err := blocker.Exec(waitCtx, tc.update, tc.args...); err != nil {
+				t.Fatal(err)
+			}
+			mailSent := make(chan struct{}, 1)
+			service := NewStaffInvitationService(repo, staffTestMailer(func(context.Context, string) error {
+				mailSent <- struct{}{}
+				return nil
+			}))
+			email, requestID := "suspension-"+tc.table+"@school.invalid", uuid.NewString()
+			result := make(chan error, 1)
+			go func() {
+				_, err := service.InviteStaff(waitCtx, ownerA, "staff-test-a",
+					StaffInvitationRequest{Email: email, Role: "PRINCIPAL"}, requestID)
+				result <- err
+			}()
+			ticker := time.NewTicker(25 * time.Millisecond)
+			defer ticker.Stop()
+			for {
+				var waiting bool
+				if err := pool.QueryRow(waitCtx, `SELECT EXISTS(
+					SELECT 1 FROM pg_stat_activity
+					WHERE wait_event_type='Lock' AND $1=ANY(pg_blocking_pids(pid)) AND strpos(query, $2)>0)`,
+					int32(blocker.Conn().PgConn().PID()), "FROM "+tc.table).Scan(&waiting); err != nil {
+					t.Fatal(err)
+				}
+				if waiting {
+					break
+				}
+				select {
+				case err := <-result:
+					t.Fatalf("issuance completed before suspension committed: %v", err)
+				case <-waitCtx.Done():
+					t.Fatal("expected issuance to wait on the status row")
+				case <-ticker.C:
+				}
+			}
+			if err := blocker.Commit(waitCtx); err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case err := <-result:
+				if !errors.Is(err, ErrForbidden) {
+					t.Fatalf("expected committed suspension to deny issuance: %v", err)
+				}
+			case <-waitCtx.Done():
+				t.Fatal(waitCtx.Err())
+			}
+			select {
+			case <-mailSent:
+				t.Fatal("suspended issuer sent an email")
+			default:
+			}
+			var noSideEffects bool
+			if err := pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM invitations WHERE invited_email=$1)
+				AND NOT EXISTS (SELECT 1 FROM audit_events WHERE request_id=$2)`, email, requestID).Scan(&noSideEffects); err != nil || !noSideEffects {
+				t.Fatalf("suspended issuer left side effects: %v", err)
+			}
+			if tc.table == "users" {
+				must("UPDATE users SET status='ACTIVE' WHERE id=$1", ownerA)
+			} else {
+				must("UPDATE memberships SET status='ACTIVE' WHERE tenant_id=$1 AND user_id=$2 AND role='SCHOOL_OWNER'", tenantA, ownerA)
+			}
+		})
 	}
 
 	t.Run("unconfirmed delivery cannot grant access even when revocation rolls back", func(t *testing.T) {

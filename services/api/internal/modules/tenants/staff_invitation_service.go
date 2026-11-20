@@ -10,6 +10,8 @@ import (
 	"github.com/school-without-walls/api/internal/modules/auth"
 )
 
+const staffInvitationCreateAction = "tenant.staff_invitation.create"
+
 // StaffInvitationRepository supplies tenant-authorized, audited operations.
 type StaffInvitationRepository interface {
 	CreateStaffInvitation(
@@ -108,7 +110,7 @@ func (s *StaffInvitationService) InviteStaff(
 	}
 
 	event := &auth.AuditEvent{
-		Action:    "tenant.staff_invitation.create",
+		Action:    staffInvitationCreateAction,
 		ActorID:   &actorID,
 		RequestID: requestID,
 		MetadataRedacted: map[string]any{

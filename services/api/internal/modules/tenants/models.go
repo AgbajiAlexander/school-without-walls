@@ -17,18 +17,20 @@ var (
 )
 
 type Tenant struct {
-	ID              uuid.UUID       `json:"id"`
-	Slug            string          `json:"slug"`
-	Name            string          `json:"name"`
-	Status          string          `json:"status"`
-	Locale          string          `json:"locale"`
-	Timezone        string          `json:"timezone"`
-	Branding        map[string]any  `json:"branding"`
-	FeatureFlags    map[string]bool `json:"feature_flags"`
-	EducationStages []string        `json:"education_stages"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
-	CurrentRole     string          `json:"current_role,omitempty"`
+	ID                 uuid.UUID       `json:"id"`
+	Slug               string          `json:"slug"`
+	Name               string          `json:"name"`
+	Status             string          `json:"status"`
+	Locale             string          `json:"locale"`
+	Timezone           string          `json:"timezone"`
+	Branding           map[string]any  `json:"branding"`
+	FeatureFlags       map[string]bool `json:"feature_flags"`
+	EducationStages    []string        `json:"education_stages"`
+	CreatedAt          time.Time       `json:"created_at"`
+	UpdatedAt          time.Time       `json:"updated_at"`
+	CurrentRole        string          `json:"current_role,omitempty"`
+	CanInviteStaff     bool            `json:"can_invite_staff"`
+	CanManageAcademics bool            `json:"can_manage_academics"`
 }
 
 type ProvisionRequest struct {

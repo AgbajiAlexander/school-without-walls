@@ -89,6 +89,8 @@ func (m *MockRepository) GetForMember(_ context.Context, slug string, userID uui
 	}
 	result := cloneTenant(tenant)
 	result.CurrentRole = role
+	result.CanInviteStaff = role == "SCHOOL_OWNER"
+	result.CanManageAcademics = mockCanManageAcademics(role)
 	return result, nil
 }
 
@@ -111,7 +113,13 @@ func (m *MockRepository) UpdateSettings(_ context.Context, slug string, userID u
 	m.AuditEvents = append(m.AuditEvents, event)
 	result := cloneTenant(tenant)
 	result.CurrentRole = role
+	result.CanInviteStaff = role == "SCHOOL_OWNER"
+	result.CanManageAcademics = mockCanManageAcademics(role)
 	return result, nil
+}
+
+func mockCanManageAcademics(role string) bool {
+	return role == "SCHOOL_OWNER" || role == "SCHOOL_ADMIN" || role == "PRINCIPAL"
 }
 
 func (m *MockRepository) AddMembership(slug string, userID uuid.UUID, role string) {

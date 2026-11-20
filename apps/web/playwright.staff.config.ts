@@ -12,6 +12,9 @@ if (!listing && (!webDir || resolve(webDir) === process.cwd() ||
 
 const password = process.env.SWW_B12_ADMIN_PASSWORD || randomBytes(24).toString("base64url");
 process.env.SWW_B12_ADMIN_PASSWORD = password;
+const fixtureKey = process.env.SWW_B12_FIXTURE_KEY || randomBytes(32).toString("base64url");
+if (fixtureKey === password) throw new Error("Browser fixture must use an independent key");
+process.env.SWW_B12_FIXTURE_KEY = fixtureKey;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -37,7 +40,7 @@ export default defineConfig({
       timeout: 120_000,
       stdout: "ignore",
       stderr: "ignore",
-      env: { SWW_B12_DATABASE_URL: database!, SWW_B12_ADMIN_PASSWORD: password },
+      env: { SWW_B12_DATABASE_URL: database!, SWW_B12_ADMIN_PASSWORD: password, SWW_B12_FIXTURE_KEY: fixtureKey },
     },
     {
       command: "node node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 13000",
