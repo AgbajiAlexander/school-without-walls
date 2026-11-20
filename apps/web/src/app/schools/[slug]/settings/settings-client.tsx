@@ -3,8 +3,9 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { establishCSRFToken, updateTenantSettings } from "@/lib/tenant-client";
+import { canInviteStaff, establishCSRFToken, updateTenantSettings } from "@/lib/tenant-client";
 import type { Tenant } from "@/lib/tenant-client";
+import StaffInvitationForm from "./staff-invitation-form";
 
 const stages = [
   { value: "EARLY_YEARS", label: "Early years" },
@@ -118,6 +119,7 @@ export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; 
             </button>
           </form>
         </section>
+        {canInviteStaff(tenant) && <StaffInvitationForm key={tenant.id} schoolSlug={tenant.slug} />}
       </div>
     </main>
   );

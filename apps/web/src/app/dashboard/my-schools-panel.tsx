@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { listMySchools, type Tenant } from "@/lib/tenant-client";
+import { canInviteStaff, listMySchools, type Tenant } from "@/lib/tenant-client";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -114,6 +114,14 @@ export default function MySchoolsPanel() {
                   >
                     School Settings
                   </Link>
+                  {canInviteStaff(school) && (
+                    <Link
+                      href={`${base}/settings#invite-staff`}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                    >
+                      Invite Staff
+                    </Link>
+                  )}
                 </div>
               </article>
             );

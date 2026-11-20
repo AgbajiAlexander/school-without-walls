@@ -154,6 +154,7 @@ func (h *Handler) RevokeSession(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) VerifyInvitation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	inv, err := h.authService.VerifyInvitation(r.Context(), chi.URLParam(r, "token"))
 	if err != nil {
 		apphttp.ErrorJSON(w, r, http.StatusUnprocessableEntity, apphttp.ErrCodeInvalidInput, "Invitation token is invalid or expired", nil)
@@ -168,6 +169,7 @@ func (h *Handler) VerifyInvitation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	reqID := middleware.GetRequestID(r.Context())
 	var req AcceptInvitationRequest
 	if err := decodeRequest(w, r, &req); err != nil {
