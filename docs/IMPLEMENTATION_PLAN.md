@@ -283,3 +283,9 @@ Migration 000011 adds a global framework edition registry and objectives indexed
 Published metadata and objectives are retained, including after an edition is withdrawn. Editors create a new edition for revisions. The PostgreSQL regression verified coexisting editions, edition-scoped objective codes, Nigerian jurisdiction validation, and retention of a withdrawn edition's original objective. The fixture uses fictional text and does not confer curriculum rights or approval.
 
 SWW-006 remains open. The published registry API, alignment review, tenant edition selection, and rights-reviewed content acceptance are pending.
+
+### SWW-006 published curriculum catalog API
+
+`GET /api/v1/curriculum/frameworks` lists published edition metadata and identifies Nigerian primary, developmental, and enrichment frameworks. `GET /api/v1/curriculum/objectives` requires a `framework_version_id` and accepts an optional `stage`. Both return up to 50 items in ID order with an optional `next` cursor passed back as `after`. Unknown, draft, and withdrawn editions return an empty objective list. The catalog is global and contains no tenant selections or learner information.
+
+Reads require an authenticated user with an active membership in an active school. The PostgreSQL-backed router test verified anonymous denial, platform-operator denial without school membership, school and membership suspension, published-only results, provenance metadata, stage filtering, and cursor pagination. Registry browsing in the dashboard, alignment review, tenant session edition selection, and rights-reviewed content remain open.

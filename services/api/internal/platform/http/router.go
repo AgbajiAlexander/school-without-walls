@@ -10,6 +10,7 @@ import (
 	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/academics"
 	"github.com/school-without-walls/api/internal/modules/auth"
+	"github.com/school-without-walls/api/internal/modules/curriculum"
 	"github.com/school-without-walls/api/internal/modules/people"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
@@ -38,6 +39,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	r := chi.NewRouter()
 
 	var peopleH *people.Handler
+	var curriculumH *curriculum.Handler
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
 	academicRepo := cfg.AcademicRepo
@@ -62,6 +64,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			offeringRepo = academics.NewSubjectOfferingRepository(dbWrapper.Pool)
 			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
 			peopleH = people.NewHandler(people.NewRepository(dbWrapper.Pool))
+			curriculumH = curriculum.NewHandler(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -213,6 +216,11 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 				)
 			}
 		})
+
+		if curriculumH != nil {
+			v1.With(auth.RequireAuth).Get("/curriculum/frameworks", curriculumH.ListFrameworks)
+			v1.With(auth.RequireAuth).Get("/curriculum/objectives", curriculumH.ListObjectives)
+		}
 
 		if peopleH != nil {
 			if staffInvitationH != nil {
