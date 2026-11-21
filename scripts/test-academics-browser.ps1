@@ -43,15 +43,19 @@ try {
  Remove-Item Env:SMTP_HOST,Env:SMTP_PORT,Env:SMTP_USERNAME,Env:SMTP_PASSWORD,Env:SMTP_FROM -ErrorAction SilentlyContinue
  @'
 INSERT INTO users (email, password_hash, full_name, status, verified_at)
-SELECT 'academic-teacher@example.test', password_hash, 'Fictional Teacher', 'ACTIVE', CURRENT_TIMESTAMP
-FROM users WHERE email = 'academic-owner@example.test';
+SELECT fixture.email, password_hash, fixture.name, 'ACTIVE', CURRENT_TIMESTAMP
+FROM users CROSS JOIN (VALUES
+    ('academic-teacher@example.test', 'Fictional Teacher'),
+    ('academic-curriculum@example.test', 'Fictional Curriculum Member')
+) AS fixture(email, name)
+WHERE users.email = 'academic-owner@example.test';
 INSERT INTO tenants (id, slug, name, status) VALUES
 (gen_random_uuid(), 'academic-fixture-a', 'Fictional Academic School A', 'ACTIVE'),
 (gen_random_uuid(), 'academic-fixture-b', 'Fictional Academic School B', 'ACTIVE');
 INSERT INTO memberships (id, tenant_id, user_id, role)
 SELECT gen_random_uuid(), t.id, u.id, CASE WHEN u.email = 'academic-owner@example.test' THEN 'SCHOOL_OWNER' ELSE 'TEACHER' END
 FROM tenants t CROSS JOIN users u
-WHERE t.slug = 'academic-fixture-a' AND u.email IN ('academic-owner@example.test','academic-teacher@example.test');
+WHERE t.slug = 'academic-fixture-a' AND u.email IN ('academic-owner@example.test','academic-teacher@example.test','academic-curriculum@example.test');
 
 DO $$
 DECLARE
@@ -78,6 +82,19 @@ BEGIN
     VALUES (gen_random_uuid(), school, class_a, 'A', 'Fixture Arm A');
 END
 $$;
+
+INSERT INTO curriculum_framework_versions
+    (id,jurisdiction,publisher,title,edition,framework_kind,effective_from,source_url,license_note)
+VALUES
+    ('82c5c04e-9009-443e-829a-ac8443248780','NG','Fictional Publisher','Fictional Nigerian Framework','Example 1','NIGERIAN_PRIMARY','2030-01-01','https://example.test/curriculum','Fictional source note'),
+    (gen_random_uuid(),'GB-ENG','Fictional Publisher','Fictional British Framework','Example 1','ENRICHMENT','2030-01-01','https://example.test/enrichment','Fictional source note'),
+    (gen_random_uuid(),'NG','Fictional Publisher','Fictional Unpublished Framework','Draft','NIGERIAN_PRIMARY','2030-01-01','https://example.test/draft','Fictional source note');
+INSERT INTO curriculum_objectives (id,framework_version_id,stage,grade_band,subject,strand,code,objective_text)
+VALUES
+    (gen_random_uuid(),'82c5c04e-9009-443e-829a-ac8443248780','PRIMARY','Primary 1','Mathematics','Number','FIX.COUNT','Count the objects in a fictional group.'),
+    (gen_random_uuid(),'82c5c04e-9009-443e-829a-ac8443248780','EARLY_YEARS','Nursery','Mathematics','Shape','FIX.SHAPE','Compare two fictional shapes.');
+UPDATE curriculum_framework_versions SET status = 'PUBLISHED'
+WHERE title IN ('Fictional Nigerian Framework', 'Fictional British Framework');
 '@ | & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
  if($LASTEXITCODE){throw 'fixture setup failed'}
  Set-Location "$root/apps/web"

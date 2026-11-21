@@ -93,6 +93,12 @@ export default function MySchoolsPanel() {
       )}
 
       {loadState === "ready" && schools.length > 0 && (
+        <Link href="/curriculum" className="mt-3 inline-block min-h-11 py-2 font-medium text-green-800 underline">
+          Browse curriculum
+        </Link>
+      )}
+
+      {loadState === "ready" && schools.length > 0 && (
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {schools.map((school) => {
             const base = `/schools/${encodeURIComponent(school.slug)}`;

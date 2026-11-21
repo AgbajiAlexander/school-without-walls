@@ -289,3 +289,11 @@ SWW-006 remains open. The published registry API, alignment review, tenant editi
 `GET /api/v1/curriculum/frameworks` lists published edition metadata and identifies Nigerian primary, developmental, and enrichment frameworks. `GET /api/v1/curriculum/objectives` requires a `framework_version_id` and accepts an optional `stage`. Both return up to 50 items in ID order with an optional `next` cursor passed back as `after`. Unknown, draft, and withdrawn editions return an empty objective list. The catalog is global and contains no tenant selections or learner information.
 
 Reads require an authenticated user with an active membership in an active school. The PostgreSQL-backed router test verified anonymous denial, platform-operator denial without school membership, school and membership suspension, published-only results, provenance metadata, stage filtering, and cursor pagination. Registry browsing in the dashboard, alignment review, tenant session edition selection, and rights-reviewed content remain open.
+
+### SWW-006 dashboard curriculum browser
+
+My Schools links active members to the published curriculum catalog. The page displays edition provenance and source links, distinguishes Nigerian curriculum from optional enrichment, and supports education-stage filtering and cursor navigation. Session and membership checks remain in Go. The browser fixture uses fictional curriculum only.
+
+All 189 frontend tests, TypeScript, lint, and the Next.js build passed. All six Edge journeys passed against the real Go API and disposable PostgreSQL. The curriculum journey verified anonymous redirect, visible provenance, separate enrichment labeling, draft exclusion, filtering, an empty result, and no horizontal overflow at 360 pixels.
+
+Alignment review, tenant edition selection, and rights-reviewed content remain open.
