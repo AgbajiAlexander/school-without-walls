@@ -139,6 +139,10 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 		testSchoolCurriculumSelection(t, ctx, pool)
 	})
 
+	t.Run("lesson_lifecycle", func(t *testing.T) {
+		testLessonLifecycle(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)

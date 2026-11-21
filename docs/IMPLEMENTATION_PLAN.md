@@ -357,3 +357,9 @@ Active platform administrators can POST /api/v1/curriculum/frameworks/import to 
 GET /api/v1/curriculum/frameworks/{frameworkID}/draft gives authorized operators the stored draft objectives and provenance for review. POST /api/v1/curriculum/frameworks/{frameworkID}/publish requires separate rights and content confirmations. Both writes enforce CSRF and recheck the active operator grant. The authenticated actor and publication are recorded atomically. School members can only see objectives after publication.
 
 The PostgreSQL HTTP test verified denial of school-member writes and draft previews, missing CSRF, missing rights confirmation, non-HTTPS and whitespace-containing URLs, draft invisibility, operator preview, explicit publication, duplicate rejection, and audit records. The regression used original fictional fixtures. Actual curriculum rights and educational review still require qualified reviewers, and sample lessons and assignments depend on the corresponding learning workflows.
+
+### SWW-007 lesson lifecycle storage
+
+Migration 000014 adds tenant-scoped text lesson drafts tied to an offering, author membership, curriculum selection revision, and a primary objective. New drafts use the current primary edition for the offering's session and stage. Existing drafts retain the original reference when a school selects another edition. Publication requires an active session and a still-published pinned edition. Published text is immutable and archival retains its history.
+
+The disposable PostgreSQL regression verified wrong-school and wrong-edition denial, draft-session publication denial, historical edition pinning, withdrawal before publication, and archival. Teacher assignment and learner enrollment authorization must be applied in the Go API. The teacher and student pages, optional lesson review, enrichment links, and media remain open.
