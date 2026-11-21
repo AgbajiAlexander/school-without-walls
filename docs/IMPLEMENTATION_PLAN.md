@@ -381,3 +381,9 @@ PostgreSQL HTTP coverage exercises the assignment gate, missing CSRF, cross-scho
 The teaching API lists assigned offerings, eligible objectives from the current primary edition, and the teacher's own lesson summaries. The direct lesson route returns full text only when the requesting teacher is the author and still holds the active offering assignment. Reads are uncached and lists use a bounded cursor.
 
 The focused PostgreSQL HTTP regression verified assignment-scoped offering discovery, current-edition objective filtering, draft summary versus detail, cross-school denial, and loss of detail access after assignment revocation. The next application slice is the teacher and learner browser workflow.
+
+### SWW-007 text lesson browser workflow
+
+My Schools links teachers and students to their teaching and lesson pages using independent server-derived capabilities. An assigned teacher can choose an eligible primary objective, create and edit a draft, and explicitly confirm publication or archival. Enrolled students can read published text with the existing server permission checks.
+
+The seven Edge journeys passed with the real API and disposable PostgreSQL. The lesson journey verified draft invisibility, teacher publication, enrolled-student reading on a 360-pixel screen, student denial on the teacher route, draft and cross-school direct-link denial, and literal display of HTML-like lesson text. The required PostgreSQL Go suite, vet and build, 189 frontend tests, TypeScript, lint and production build passed. Optional review, enrichment selection and private media remain open.

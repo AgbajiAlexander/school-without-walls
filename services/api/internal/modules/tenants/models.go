@@ -32,6 +32,7 @@ type Tenant struct {
 	CanInviteStaff     bool            `json:"can_invite_staff"`
 	CanManageAcademics bool            `json:"can_manage_academics"`
 	CanReadLessons     bool            `json:"can_read_lessons"`
+	CanTeachLessons    bool            `json:"can_teach_lessons"`
 }
 
 type ProvisionRequest struct {

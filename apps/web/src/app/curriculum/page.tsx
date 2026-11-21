@@ -187,7 +187,7 @@ export default async function CurriculumPage({ searchParams }: {
     <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-8 sm:px-6">
       <Link href="/dashboard" className="text-green-800 underline">Back to My Schools</Link>
       <h1 className="text-2xl font-semibold">{objective ? "Verified enrichment alignments" : version ? "Curriculum objectives" : "Curriculum frameworks"}</h1>
-      {objective && version && <Link href={url(editionFilters)} className="inline-block py-2 text-green-800 underline">Back to objectives</Link>}
+      {objective && version && <a href={url(editionFilters)} className="inline-block py-2 text-green-800 underline">Back to objectives</a>}
       {(version || objective) && <Link href={root} className="inline-block py-2 text-green-800 underline">Back to frameworks</Link>}
       {page ? (
         objective ? <Alignments page={page as Page<Alignment>} />
