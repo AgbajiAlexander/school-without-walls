@@ -219,6 +219,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 		if curriculumH != nil {
 			v1.With(auth.RequireAuth).Get("/curriculum/frameworks", curriculumH.ListFrameworks)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/frameworks/import", curriculumH.ImportFramework)
+			v1.With(auth.RequireAuth).Get("/curriculum/frameworks/{frameworkID}/draft", curriculumH.PreviewImportedFramework)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/frameworks/{frameworkID}/publish", curriculumH.PublishFramework)
 			v1.With(auth.RequireAuth).Get("/curriculum/objectives", curriculumH.ListObjectives)
 			v1.With(auth.RequireAuth).Get("/curriculum/alignments", curriculumH.ListVerifiedAlignments)
 			v1.With(auth.RequireAuth).Get("/curriculum/alignments/drafts", curriculumH.ListDraftAlignments)

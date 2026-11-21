@@ -349,3 +349,11 @@ Academic managers can open Curriculum editions for the selected session, filter 
 The required PostgreSQL Go suite, vet, build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against disposable PostgreSQL and the real API. The extended academics journey saved separate Nigerian primary and optional British enrichment selections, checked persistence, and verified teacher and foreign-school denial.
 
 Rights-reviewed content and downstream historical lesson/report integration remain open.
+
+### SWW-006 curriculum import and publication API
+
+Active platform administrators can POST /api/v1/curriculum/frameworks/import to import a bounded JSON framework edition with up to 50 structured objectives. The request requires an HTTPS provenance URL, a license note, and explicit rights confirmation. The import stores a draft with its objectives atomically and records a global audit event. The endpoint accepts structured text and does not retrieve files or external URLs.
+
+GET /api/v1/curriculum/frameworks/{frameworkID}/draft gives authorized operators the stored draft objectives and provenance for review. POST /api/v1/curriculum/frameworks/{frameworkID}/publish requires separate rights and content confirmations. Both writes enforce CSRF and recheck the active operator grant. The authenticated actor and publication are recorded atomically. School members can only see objectives after publication.
+
+The PostgreSQL HTTP test verified denial of school-member writes and draft previews, missing CSRF, missing rights confirmation, non-HTTPS and whitespace-containing URLs, draft invisibility, operator preview, explicit publication, duplicate rejection, and audit records. The regression used original fictional fixtures. Actual curriculum rights and educational review still require qualified reviewers, and sample lessons and assignments depend on the corresponding learning workflows.

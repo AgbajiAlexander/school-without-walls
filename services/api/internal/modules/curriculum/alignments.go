@@ -94,7 +94,7 @@ func (h *Handler) ListDraftAlignments(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateAlignment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var input alignmentInput
-	if !decodeAlignmentRequest(w, r, &input) ||
+	if !decodeCurriculumRequest(w, r, &input, 4096) ||
 		input.PrimaryObjectiveID == uuid.Nil || input.RelatedObjectiveID == uuid.Nil ||
 		input.PrimaryObjectiveID == input.RelatedObjectiveID {
 		invalidAlignment(w, r)
@@ -119,7 +119,7 @@ func (h *Handler) CreateAlignment(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) ReviewAlignment(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	id, err := uuid.Parse(chi.URLParam(r, "alignmentID"))
-	if err != nil || id == uuid.Nil || !decodeAlignmentRequest(w, r, &struct{}{}) {
+	if err != nil || id == uuid.Nil || !decodeCurriculumRequest(w, r, &struct{}{}, 4096) {
 		invalidAlignment(w, r)
 		return
 	}
@@ -148,7 +148,7 @@ func (h *Handler) writeAlignment(w http.ResponseWriter, r *http.Request, id uuid
 	}
 	ctx := r.Context()
 	requestID := middleware.GetRequestID(ctx)
-	err := h.mutateAlignment(ctx, actor.ID, id, action, requestID, write)
+	err := h.writeCatalogChange(ctx, actor.ID, id, action, "curriculum_alignment", requestID, write)
 	if err != nil {
 		var dbErr *pgconn.PgError
 		switch {
@@ -172,7 +172,7 @@ func (h *Handler) writeAlignment(w http.ResponseWriter, r *http.Request, id uuid
 	}{ID: id, ReviewStatus: status})
 }
 
-func (h *Handler) mutateAlignment(ctx context.Context, actor, id uuid.UUID, action, requestID string,
+func (h *Handler) writeCatalogChange(ctx context.Context, actor, id uuid.UUID, action, subjectType, requestID string,
 	write func(context.Context, pgx.Tx, uuid.UUID) error,
 ) error {
 	tx, err := h.pool.Begin(ctx)
@@ -198,19 +198,32 @@ func (h *Handler) mutateAlignment(ctx context.Context, actor, id uuid.UUID, acti
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO audit_events (id, actor_id, action, subject_type, subject_id, request_id)
-		VALUES ($1, $2, $3, 'curriculum_alignment', $4, $5)
-	`, uuid.New(), actor, action, id.String(), requestID); err != nil {
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, uuid.New(), actor, action, subjectType, id.String(), requestID); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
 }
 
-func decodeAlignmentRequest(w http.ResponseWriter, r *http.Request, dst any) bool {
-	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096))
+func decodeCurriculumRequest(w http.ResponseWriter, r *http.Request, dst any, limit int64) bool {
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit))
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(dst) == nil && errors.Is(decoder.Decode(new(any)), io.EOF)
 }
 
 func invalidAlignment(w http.ResponseWriter, r *http.Request) {
 	response.ErrorJSON(w, r, http.StatusUnprocessableEntity, response.ErrCodeInvalidInput, "Invalid curriculum alignment", nil)
+}
+
+func writeCatalogError(w http.ResponseWriter, r *http.Request, err error, message string) {
+	var dbErr *pgconn.PgError
+	switch {
+	case errors.Is(err, errReviewerRequired):
+		response.ErrorJSON(w, r, http.StatusForbidden, response.ErrCodeForbidden, "Global curriculum administrator access required", nil)
+	case errors.As(err, &dbErr) && dbErr.Code == "23505":
+		response.ErrorJSON(w, r, http.StatusConflict, response.ErrCodeConflict, "This framework edition already exists", nil)
+	default:
+		slog.Error("curriculum catalog write failed", "request_id", middleware.GetRequestID(r.Context()))
+		response.ErrorJSON(w, r, http.StatusInternalServerError, response.ErrCodeInternalError, message, nil)
+	}
 }

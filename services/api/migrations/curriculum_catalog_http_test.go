@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -29,11 +30,11 @@ func testCurriculumCatalogHTTP(t *testing.T, ctx context.Context, pool *pgxpool.
 		($2,'catalog-operator@example.test','unused','Fictional Operator','ACTIVE')`, member, operator)
 	write(`INSERT INTO platform_admins (user_id) VALUES ($1)`, operator)
 	write(`INSERT INTO memberships (id,tenant_id,user_id,role) VALUES ($1,$2,$3,'TEACHER')`, uuid.New(), school, member)
-	memberToken, operatorToken := uuid.NewString(), uuid.NewString()
+	memberToken, operatorToken, csrf := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	write(`INSERT INTO sessions (user_id,token_hash,csrf_token_hash,ip_address,user_agent,expires_at) VALUES
 		($1,$2,$5,'127.0.0.1','Fixture',clock_timestamp() + interval '1 hour'),
 		($3,$4,$5,'127.0.0.1','Fixture',clock_timestamp() + interval '1 hour')`,
-		member, auth.HashToken(memberToken), operator, auth.HashToken(operatorToken), auth.HashToken(uuid.NewString()))
+		member, auth.HashToken(memberToken), operator, auth.HashToken(operatorToken), auth.HashToken(csrf))
 
 	nigeria, enrichment, draft, withdrawn := uuid.New(), uuid.New(), uuid.New(), uuid.New()
 	write(`INSERT INTO curriculum_framework_versions
@@ -126,6 +127,70 @@ func testCurriculumCatalogHTTP(t *testing.T, ctx context.Context, pool *pgxpool.
 	if len(last) != 1 || last[0].ID.String() <= next || end != "" {
 		t.Fatal("invalid last page of filtered objectives")
 	}
+	post := func(path, token, csrfHeader, payload string, want int) []byte {
+		t.Helper()
+		req := httptest.NewRequest("POST", "/api/v1/curriculum/"+path, strings.NewReader(payload))
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
+		req.Header.Set(auth.HeaderCSRF, csrfHeader)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("curriculum mutation status %d, want %d", rec.Code, want)
+		}
+		return rec.Body.Bytes()
+	}
+	const payload = `{
+		"jurisdiction":"NG","publisher":"Fictional Importer","title":"Fictional Draft Import",
+		"edition":"first","framework_kind":"NIGERIAN_PRIMARY","effective_from":"2030-04-01",
+		"source_url":"https://example.test/import","license_note":"Original fictional fixture",
+		"rights_confirmed":true,"objectives":[{"stage":"PRIMARY","grade_band":"Primary 1",
+		"subject":"Mathematics","strand":"Numbers","code":"IMPORT.1","objective_text":"Count fictional blocks."}]
+	}`
+	post("frameworks/import", memberToken, csrf, payload, 403)
+	post("frameworks/import", operatorToken, "", payload, 403)
+	post("frameworks/import", operatorToken, csrf, strings.Replace(payload, "true", "false", 1), 422)
+	post("frameworks/import", operatorToken, csrf, strings.Replace(payload, "https://", "file://", 1), 422)
+	post("frameworks/import", operatorToken, csrf, strings.Replace(payload, "/import", "/with space", 1), 422)
+	var imported struct {
+		Data struct {
+			ID     uuid.UUID
+			Status string
+		}
+	}
+	if err := json.Unmarshal(post("frameworks/import", operatorToken, csrf, payload, 201), &imported); err != nil ||
+		imported.Data.ID == uuid.Nil || imported.Data.Status != "DRAFT" {
+		t.Fatal("expected an imported draft")
+	}
+	post("frameworks/import", operatorToken, csrf, payload, 409)
+	objectives := "objectives?framework_version_id=" + imported.Data.ID.String()
+	items, _ = get(objectives, memberToken, 200)
+	if len(items) != 0 {
+		t.Fatal("import must not publish objectives")
+	}
+	preview := "frameworks/" + imported.Data.ID.String() + "/draft"
+	get(preview, memberToken, 403)
+	draftItems, _ := get(preview, operatorToken, 200)
+	if len(draftItems) != 1 || draftItems[0].LicenseNote != "Original fictional fixture" {
+		t.Fatal("operator preview omitted the imported objective or rights note")
+	}
+	publish := "frameworks/" + imported.Data.ID.String() + "/publish"
+	const approval = `{"rights_reviewed":true,"content_reviewed":true}`
+	post(publish, memberToken, csrf, approval, 403)
+	post(publish, operatorToken, csrf, `{"rights_reviewed":true}`, 422)
+	post(publish, operatorToken, csrf, approval, 200)
+	post(publish, operatorToken, csrf, approval, 409)
+	items, _ = get(objectives, memberToken, 200)
+	if len(items) != 1 || items[0].Stage != "PRIMARY" {
+		t.Fatal("expected the reviewed objective after publication")
+	}
+	var writes int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events
+		WHERE actor_id=$1 AND subject_type='curriculum_framework' AND subject_id=$2
+		  AND action IN ('curriculum.framework.import', 'curriculum.framework.publish')`,
+		operator, imported.Data.ID.String()).Scan(&writes); err != nil || writes != 2 {
+		t.Fatal("expected one audit event each for import and publication")
+	}
+
 	write(`UPDATE tenants SET status='SUSPENDED' WHERE id=$1`, school)
 	get("frameworks", memberToken, 403)
 	write(`UPDATE tenants SET status='ACTIVE' WHERE id=$1`, school)

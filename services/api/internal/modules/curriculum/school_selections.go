@@ -86,7 +86,7 @@ func (h *Handler) ListSchoolSelections(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) CreateSchoolSelection(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	var input selectionInput
-	if !decodeAlignmentRequest(w, r, &input) || !validSelection(input) {
+	if !decodeCurriculumRequest(w, r, &input, 4096) || !validSelection(input) {
 		invalidQuery(w, r)
 		return
 	}
