@@ -198,6 +198,11 @@ func writeMediaAudit(ctx context.Context, tx pgx.Tx, r *http.Request, tenant, ac
 	return err
 }
 
+const readyLessonAttachment = `EXISTS (
+	SELECT 1 FROM lesson_media item WHERE item.tenant_id=l.tenant_id
+		AND item.lesson_id=l.id AND item.id=l.media_id AND item.status='READY' AND item.checksum_sha256 IS NOT NULL
+)`
+
 func (h *Handler) DownloadLessonMedia(w http.ResponseWriter, r *http.Request) {
 	actor, ok := teachingActor(w, r)
 	if !ok {
@@ -208,14 +213,17 @@ func (h *Handler) DownloadLessonMedia(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var tenant, mediaID uuid.UUID
-	err := h.pool.QueryRow(r.Context(), `SELECT l.tenant_id,l.media_id`+studentLessonScope+`
-		AND EXISTS (SELECT 1 FROM lesson_media item WHERE item.tenant_id=l.tenant_id
-			AND item.lesson_id=l.id AND item.id=l.media_id AND item.status='READY' AND item.checksum_sha256 IS NOT NULL)
-	`, chi.URLParam(r, "slug"), actor, id, nil).Scan(&tenant, &mediaID)
+	err := h.pool.QueryRow(r.Context(), `SELECT l.tenant_id,l.media_id`+studentLessonScope+` AND `+readyLessonAttachment,
+		chi.URLParam(r, "slug"), actor, id, nil).Scan(&tenant, &mediaID)
 	if err != nil {
 		lessonReadError(w, r, err)
 		return
 	}
+	h.writeDownloadGrant(w, r, tenant, mediaID)
+}
+
+func (h *Handler) writeDownloadGrant(w http.ResponseWriter, r *http.Request, tenant, mediaID uuid.UUID) {
+	w.Header().Set("Cache-Control", "no-store")
 	signed, err := h.mediaStore.SignDownload(r.Context(), tenant, mediaID)
 	if err != nil {
 		mediaFailure(w, r, err)

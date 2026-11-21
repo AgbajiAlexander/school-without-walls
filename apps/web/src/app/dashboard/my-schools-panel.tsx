@@ -142,9 +142,9 @@ export default function MySchoolsPanel() {
                     </Link>
                   )}
                   {school.can_teach_lessons === true && (
-                    <Link href={`${base}/teaching`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                    <a href={`${base}/teaching`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
                       Teaching lessons
-                    </Link>
+                    </a>
                   )}
                   {school.can_read_lessons === true && (
                     <Link href={`${base}/learning`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">

@@ -12,6 +12,7 @@ export function middleware(request: NextRequest) {
     nonce,
     request.nextUrl.protocol,
     process.env.NODE_ENV,
+    /^\/schools\/[^/]+\/teaching\/?$/.test(request.nextUrl.pathname) ? process.env.LESSON_MEDIA_BROWSER_ORIGIN : undefined,
   );
   const contentSecurityPolicy = documentSecurityHeaders.find(
     ({ key }) => key === "Content-Security-Policy",

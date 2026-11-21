@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
+import { parseMediaUploadOrigin } from "@/lib/security-headers.mjs";
 import LessonEditor, { type EnrichmentOption } from "./lesson-editor";
 
 type Page<T> = { items: T[]; next?: string };
 type Offering = { id: string; subject: string; class_name: string; arm_name?: string; term_name: string };
 type Objective = { id: string; code: string; objective_text: string; enrichment?: EnrichmentOption[] };
-type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string; enrichment?: EnrichmentOption[] };
+type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string; media_upload_enabled?: boolean; enrichment?: EnrichmentOption[] };
 
 export default async function TeachingPage({ params, searchParams }: {
   params: Promise<{ slug: string }>;
@@ -70,7 +71,7 @@ export default async function TeachingPage({ params, searchParams }: {
             </li>)}</ul> : <p>No lessons on this page.</p>}
             {lessons.next && <Link href={href({ lesson_after: lessons.next })} className="text-green-800 underline">Next teaching lessons</Link>}
           </section>
-          {lesson ? (selected ? <LessonEditor key={selected.id} endpoint={`${endpoint}/lessons`} root={root} csrf={csrf} lesson={selected} /> :
+          {lesson ? (selected ? <LessonEditor key={selected.id} endpoint={`${endpoint}/lessons`} root={root} csrf={csrf} lesson={selected} uploadOrigin={selected.media_upload_enabled ? parseMediaUploadOrigin(process.env.LESSON_MEDIA_BROWSER_ORIGIN) : ""} /> :
             <p role="status">Teaching lesson unavailable.</p>) : offering ? (
             <>
               {objectives?.items.length ? <LessonEditor key={offering} endpoint={`${endpoint}/lessons`} root={root} csrf={csrf}

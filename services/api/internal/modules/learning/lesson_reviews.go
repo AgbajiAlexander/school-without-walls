@@ -2,6 +2,7 @@ package learning
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -17,22 +18,51 @@ const lessonReviewerScope = `
 	WHERE t.slug=$1::citext AND t.status='ACTIVE'
 `
 
+const pendingReviewScope = ` FROM lessons l
+	JOIN lesson_reviews review ON review.tenant_id=l.tenant_id AND review.lesson_id=l.id AND review.lesson_revision=l.content_revision
+	JOIN memberships author ON author.tenant_id=l.tenant_id AND author.id=l.author_membership_id
+	WHERE l.status='DRAFT' AND author.user_id<>$2 AND review.approved_at IS NULL
+	  AND EXISTS (SELECT 1` + lessonReviewerScope + ` AND t.id=l.tenant_id)`
+
 type pendingLessonReview struct {
-	ID         uuid.UUID          `json:"id"`
-	Title      string             `json:"title"`
-	Content    string             `json:"content"`
-	Revision   int64              `json:"revision"`
-	Enrichment []lessonEnrichment `json:"enrichment,omitempty"`
+	HasAttachment bool               `json:"has_attachment,omitempty"`
+	ID            uuid.UUID          `json:"id"`
+	Title         string             `json:"title"`
+	Content       string             `json:"content"`
+	Revision      int64              `json:"revision"`
+	Enrichment    []lessonEnrichment `json:"enrichment,omitempty"`
 }
 
 func (h *Handler) ListLessonReviews(w http.ResponseWriter, r *http.Request) {
 	teacherPage(h, w, r, pgx.RowToStructByName[pendingLessonReview], func(item pendingLessonReview) uuid.UUID { return item.ID },
-		`SELECT l.id,l.title,l.content,l.content_revision AS revision,`+lessonEnrichmentDetails+` AS enrichment FROM lessons l
-		JOIN lesson_reviews review ON review.tenant_id=l.tenant_id AND review.lesson_id=l.id AND review.lesson_revision=l.content_revision
-		JOIN memberships author ON author.tenant_id=l.tenant_id AND author.id=l.author_membership_id
-		WHERE l.status='DRAFT' AND author.user_id<>$2 AND review.approved_at IS NULL
-		  AND EXISTS (SELECT 1`+lessonReviewerScope+` AND t.id=l.tenant_id)
-		  AND ($3::uuid IS NULL OR l.id>$3) ORDER BY l.id LIMIT 51`)
+		`SELECT l.id,l.title,l.content,l.content_revision AS revision,`+lessonEnrichmentDetails+` AS enrichment,($4::boolean AND `+readyLessonAttachment+`) AS has_attachment`+pendingReviewScope+
+			` AND ($3::uuid IS NULL OR l.id>$3) ORDER BY l.id LIMIT 51`, h.mediaStore != nil)
+}
+
+func (h *Handler) DownloadReviewAttachment(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	actor, ok := teachingActor(w, r)
+	if !ok {
+		return
+	}
+	id, ok := teachingRouteID(w, r, "lessonID")
+	if !ok {
+		return
+	}
+	revision, err := strconv.ParseInt(r.URL.Query().Get("revision"), 10, 64)
+	if err != nil || revision <= 0 {
+		lessonUnavailable(w, r)
+		return
+	}
+	var tenant, mediaID uuid.UUID
+	err = h.pool.QueryRow(r.Context(), `SELECT l.tenant_id,l.media_id`+pendingReviewScope+
+		` AND l.id=$3 AND l.content_revision=$4 AND `+readyLessonAttachment,
+		chi.URLParam(r, "slug"), actor, id, revision).Scan(&tenant, &mediaID)
+	if err != nil {
+		lessonReadError(w, r, err)
+		return
+	}
+	h.writeDownloadGrant(w, r, tenant, mediaID)
 }
 
 func (h *Handler) ApproveLesson(w http.ResponseWriter, r *http.Request) {

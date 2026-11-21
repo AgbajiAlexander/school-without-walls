@@ -1,4 +1,19 @@
+import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
+
+const mediaEnabled = process.env.SWW_E2E_LESSON_MEDIA === "1";
+const attachmentButton = "Download lesson attachment";
+const fixturePDF = Buffer.from("%PDF-1.4\nFictional counting worksheet\n%%EOF\n");
+
+async function checkAttachment(page: import("@playwright/test").Page, button: import("@playwright/test").Locator) {
+  const [download] = await Promise.all([
+    page.waitForEvent("download", { timeout: 15_000 }),
+    button.click(),
+  ]);
+  expect(download.suggestedFilename()).toBe("counting.pdf");
+  const file = await download.path();
+  expect(file && (await readFile(file)).equals(fixturePDF)).toBe(true);
+}
 
 test("an enrolled student reads a published text lesson on mobile", async ({ page, browser, baseURL }) => {
   const password = process.env.E2E_ADMIN_PASSWORD;
@@ -16,6 +31,17 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
   await expect(page.getByRole("heading", { name: "Count the classroom objects" })).toBeVisible();
   await expect(page.getByText("Read the example, then count <strong>three</strong> objects.", { exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const progress = page.getByRole("status").filter({ hasText: /^(Not started|In progress|Completed)$/ });
+  await expect(progress).toHaveText("Not started");
+  await page.getByRole("button", { name: "Start lesson" }).click();
+  await expect(progress).toHaveText("In progress");
+  await page.reload();
+  await expect(progress).toHaveText("In progress");
+  await page.getByRole("button", { name: "Mark complete" }).click();
+  await expect(progress).toHaveText("Completed");
+  await page.reload();
+  await expect(progress).toHaveText("Completed");
+  await expect(page.getByRole("button", { name: "Mark complete" })).toHaveCount(0);
   const publishedPath = new URL(page.url()).pathname;
   const teacherContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
   const reviewerContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
@@ -49,6 +75,27 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     await teacher.getByRole("button", { name: "Save lesson draft" }).click();
     await expect(teacher.getByRole("heading", { name: "Teacher-created counting exercise" })).toBeVisible();
 
+    if (mediaEnabled) {
+      await teacher.getByLabel("Lesson attachment").setInputFiles({
+        name: "counting.pdf", mimeType: "application/pdf", buffer: fixturePDF,
+      });
+      const checkpoints: string[] = [];
+      teacher.on("response", (response) => {
+        const url = new URL(response.url());
+        if (url.pathname.endsWith("/media")) checkpoints.push("intent " + response.status());
+        if (url.pathname.endsWith("/complete")) checkpoints.push("completion " + response.status());
+        if (url.hostname === "127.0.0.2") checkpoints.push("storage " + response.status());
+      });
+      teacher.on("requestfailed", (request) => {
+        if (new URL(request.url()).hostname === "127.0.0.2") checkpoints.push("storage blocked");
+      });
+      await teacher.getByRole("button", { name: "Upload attachment" }).click();
+      try {
+        await expect(teacher.getByText("Attachment scanned and added to this draft.")).toBeVisible();
+      } catch {
+        throw new Error("Upload did not complete: " + (checkpoints.join(", ") || "no network requests"));
+      }
+    }
     await page.goto("/schools/classroom-fixture/learning");
     await expect(page.getByRole("link", { name: "Teacher-created counting exercise" })).toHaveCount(0);
     await expect(teacher.getByRole("button", { name: "Publish lesson" })).toHaveCount(0);
@@ -58,6 +105,7 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     const review = reviewer.getByRole("article").filter({ hasText: "Teacher-created counting exercise" });
     await expect(review.getByText("Count the five practice counters.")).toBeVisible();
     await expect(review.getByText(/Group fictional objects in pairs/)).toBeVisible();
+    if (mediaEnabled) await checkAttachment(reviewer, review.getByRole("button", { name: attachmentButton }));
     await review.getByRole("button", { name: "Review lesson" }).click();
     await review.getByRole("button", { name: "Confirm approval" }).click();
     await expect(reviewer.getByText("Lesson revision approved.")).toBeVisible();
@@ -71,6 +119,7 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     await expect(page.getByText("Count the five practice counters.")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Optional enrichment" })).toBeVisible();
     await expect(page.getByText(/Group fictional objects in pairs/)).toBeVisible();
+    if (mediaEnabled) await checkAttachment(page, page.getByRole("button", { name: attachmentButton }));
 
     await page.goto(new URL(teacher.url()).pathname + new URL(teacher.url()).search);
     await expect(page.getByText("Teaching lesson unavailable.")).toBeVisible();

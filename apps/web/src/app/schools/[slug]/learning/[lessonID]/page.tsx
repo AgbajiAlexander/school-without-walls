@@ -1,9 +1,14 @@
 import Link from "next/link";
-import { readStudentLessons, type LessonSummary } from "../lesson-api";
+import LessonDownload from "./lesson-download";
+import LessonProgress, { type ProgressState } from "./lesson-progress";
+import { readLessonSession, readStudentLessons, type LessonSummary } from "../lesson-api";
 
 export default async function LessonPage({ params }: { params: Promise<{ slug: string; lessonID: string }> }) {
   const { slug, lessonID } = await params;
-  const lesson = await readStudentLessons<LessonSummary & { content: string; enrichment?: { code: string; text: string; withdrawn: boolean }[] }>(slug, `/${encodeURIComponent(lessonID)}`);
+  const [lesson, session] = await Promise.all([
+    readStudentLessons<LessonSummary & { content: string; progress_state: ProgressState; has_attachment?: boolean; enrichment?: { code: string; text: string; withdrawn: boolean }[] }>(slug, `/${encodeURIComponent(lessonID)}`),
+    readLessonSession(),
+  ]);
   return (
     <main className="mx-auto w-full max-w-3xl space-y-5 px-4 py-8 sm:px-6">
       <Link href={`/schools/${encodeURIComponent(slug)}/learning`} className="text-green-800 underline">Back to lessons</Link>
@@ -12,6 +17,13 @@ export default async function LessonPage({ params }: { params: Promise<{ slug: s
           <p className="text-sm text-slate-700">{lesson.subject} · {lesson.objective_code}</p>
           <h1 className="text-2xl font-semibold">{lesson.title}</h1>
           <div className="whitespace-pre-wrap leading-relaxed">{lesson.content}</div>
+          {lesson.has_attachment && (
+            <LessonDownload endpoint={`/api/v1/tenants/${encodeURIComponent(slug)}/learning/lessons/${encodeURIComponent(lessonID)}/media`} />
+          )}
+          {session?.csrf_token && lesson.progress_state && (
+            <LessonProgress endpoint={`/api/v1/tenants/${encodeURIComponent(slug)}/learning/lessons/${encodeURIComponent(lessonID)}/progress`}
+              initialState={lesson.progress_state} csrf={session.csrf_token} />
+          )}
           {lesson.enrichment?.length ? <section className="space-y-2 border-t pt-3">
             <h2 className="text-lg font-semibold">Optional enrichment</h2>
             <ul className="space-y-2">{lesson.enrichment.map((item, index) => (

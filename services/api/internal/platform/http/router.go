@@ -234,9 +234,11 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media", learningH.UploadLessonMedia)
 				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media/{mediaID}/complete", learningH.CompleteLessonMedia)
 				v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}/media", learningH.DownloadLessonMedia)
+				v1.With(auth.RequireAuth).Get("/tenants/{slug}/lesson-reviews/{lessonID}/media", learningH.DownloadReviewAttachment)
 			}
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons", learningH.ListStudentLessons)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}", learningH.GetStudentLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/learning/lessons/{lessonID}/progress", learningH.SetLessonProgress)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings", learningH.ListTeachingOfferings)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/objectives", learningH.ListTeachingObjectives)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons", learningH.ListTeacherLessons)

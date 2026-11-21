@@ -26,15 +26,16 @@ type teachingObjective struct {
 }
 
 type teacherLessonRecord struct {
-	ID             uuid.UUID          `json:"id"`
-	OfferingID     uuid.UUID          `json:"offering_id"`
-	Title          string             `json:"title"`
-	Status         string             `json:"status"`
-	Content        *string            `json:"content,omitempty"`
-	ObjectiveCode  string             `json:"objective_code"`
-	ReviewRequired bool               `json:"review_required"`
-	ReviewStatus   string             `json:"review_status"`
-	Enrichment     []enrichmentOption `json:"enrichment,omitempty"`
+	MediaUploadEnabled bool               `json:"media_upload_enabled,omitempty"`
+	ID                 uuid.UUID          `json:"id"`
+	OfferingID         uuid.UUID          `json:"offering_id"`
+	Title              string             `json:"title"`
+	Status             string             `json:"status"`
+	Content            *string            `json:"content,omitempty"`
+	ObjectiveCode      string             `json:"objective_code"`
+	ReviewRequired     bool               `json:"review_required"`
+	ReviewStatus       string             `json:"review_status"`
+	Enrichment         []enrichmentOption `json:"enrichment,omitempty"`
 }
 
 type enrichmentOption struct {
@@ -104,7 +105,7 @@ func (h *Handler) ListTeacherLessons(w http.ResponseWriter, r *http.Request) {
 		`SELECT l.id,l.offering_id,l.title,l.status,NULL::text AS content,p.code AS objective_code,
 		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
 		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
-			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,NULL::jsonb AS enrichment`+ownedLessonJoin+
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,NULL::jsonb AS enrichment,false AS media_upload_enabled`+ownedLessonJoin+
 			`AND ($3::uuid IS NULL OR l.id>$3) ORDER BY l.id LIMIT 51`)
 }
 
@@ -121,8 +122,8 @@ func (h *Handler) GetTeacherLesson(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id,l.offering_id,l.title,l.status,l.content,p.code AS objective_code,
 		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
 		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
-			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,`+teachingEnrichment("pinned.session_id", "l.enrichment_alignment_ids")+ownedLessonJoin+`AND l.id=$3`,
-		chi.URLParam(r, "slug"), actor, id)
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,`+teachingEnrichment("pinned.session_id", "l.enrichment_alignment_ids")+`,($4::boolean AND l.status='DRAFT') AS media_upload_enabled`+ownedLessonJoin+`AND l.id=$3`,
+		chi.URLParam(r, "slug"), actor, id, h.mediaStore != nil)
 	if err != nil {
 		lessonReadError(w, r, err)
 		return

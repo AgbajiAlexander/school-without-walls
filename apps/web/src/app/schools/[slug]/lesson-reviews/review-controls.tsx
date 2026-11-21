@@ -3,7 +3,9 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-export type ReviewItem = { id: string; title: string; content: string; revision: number; enrichment?: { code: string; text: string; withdrawn: boolean }[] };
+import LessonDownload from "../learning/[lessonID]/lesson-download";
+
+export type ReviewItem = { id: string; title: string; content: string; revision: number; has_attachment?: boolean; enrichment?: { code: string; text: string; withdrawn: boolean }[] };
 
 export default function ReviewControls({ base, csrf, items, required, canConfigure }: {
   base: string; csrf: string; items: ReviewItem[]; required: boolean; canConfigure: boolean;
@@ -13,7 +15,7 @@ export default function ReviewControls({ base, csrf, items, required, canConfigu
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
-  const [confirmed, setConfirmed] = useState<string>();
+  const [confirmed, setConfirmed] = useState<{ id: string; revision: number }>();
   const [blocked, setBlocked] = useState(false);
   async function write(path: string, method: "POST" | "PUT", body: object, success: string) {
     if (lock.current || blocked) return;
@@ -58,12 +60,16 @@ export default function ReviewControls({ base, csrf, items, required, canConfigu
           {item.enrichment?.length ? <ul aria-label="Optional enrichment" className="space-y-1">
             {item.enrichment.map((mapping, index) => <li key={index}>{mapping.code} · {mapping.text}{mapping.withdrawn && " (edition withdrawn)"}</li>)}
           </ul> : null}
-          {confirmed === item.id ? <div className="flex flex-wrap items-center gap-3">
+          {item.has_attachment && (
+            <LessonDownload key={item.revision}
+              endpoint={base + "/lesson-reviews/" + encodeURIComponent(item.id) + "/media?" + new URLSearchParams({ revision: String(item.revision) })} />
+          )}
+          {confirmed?.id === item.id && confirmed.revision === item.revision ? <div className="flex flex-wrap items-center gap-3">
             <p>Approve this exact lesson revision?</p>
             <button type="button" disabled={pending} className="min-h-11 rounded bg-green-800 px-3 text-white"
               onClick={() => void write(`lesson-reviews/${encodeURIComponent(item.id)}/approve`, "POST", { revision: item.revision }, "Lesson revision approved.")}>Confirm approval</button>
             <button type="button" disabled={pending} className="min-h-11 underline" onClick={() => setConfirmed(undefined)}>Cancel</button>
-          </div> : <button type="button" disabled={pending} className="min-h-11 underline" onClick={() => setConfirmed(item.id)}>Review lesson</button>}
+          </div> : <button type="button" disabled={pending} className="min-h-11 underline" onClick={() => setConfirmed({ id: item.id, revision: item.revision })}>Review lesson</button>}
         </article>
       ))}
       {message && <p role="status" className="text-green-800">{message}</p>}

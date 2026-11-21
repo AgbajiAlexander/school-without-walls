@@ -8,15 +8,15 @@ $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $b=$PostgresBin
 $p=Join-Path ([IO.Path]::GetTempPath()) ('sww-academic-e2e-'+[guid]::NewGuid())
-if(Get-NetTCPConnection -LocalPort 15435,13003,13443,18083 -State Listen -ErrorAction SilentlyContinue){throw 'One of the isolated browser ports is occupied'}
+if(Get-NetTCPConnection -LocalPort 15436,13005,13445,18085,18086,18110 -State Listen -ErrorAction SilentlyContinue){throw 'One of the isolated browser ports is occupied'}
 & "$b/initdb.exe" -D $p -U sww_browser -A trust --no-locale --encoding=UTF8 | Out-Null
 if($LASTEXITCODE){throw 'initdb failed'}
-& "$b/pg_ctl.exe" -D $p -l "$p/server.log" -o '-p 15435 -h 127.0.0.1' -w start
+& "$b/pg_ctl.exe" -D $p -l "$p/server.log" -o '-p 15436 -h 127.0.0.1' -w start
 if($LASTEXITCODE){throw 'start failed'}
 try {
- & "$b/createdb.exe" -h 127.0.0.1 -p 15435 -U sww_browser sww_e2e_test
+ & "$b/createdb.exe" -h 127.0.0.1 -p 15436 -U sww_browser sww_e2e_test
  if($LASTEXITCODE){throw 'create failed'}
- $env:DATABASE_URL='postgres://sww_browser@127.0.0.1:15435/sww_e2e_test?sslmode=disable'
+ $env:DATABASE_URL='postgres://sww_browser@127.0.0.1:15436/sww_e2e_test?sslmode=disable'
  $env:SWW_TEST_DATABASE_URL=$env:DATABASE_URL
  $env:E2E_ADMIN_PASSWORD='A!a1'+[guid]::NewGuid().ToString('N')
  $env:BOOTSTRAP_ADMIN_PASSWORD=$env:E2E_ADMIN_PASSWORD
@@ -37,9 +37,19 @@ try {
  if($LASTEXITCODE){throw 'fictional identity setup failed'}
  Remove-Item Env:SWW_ENABLE_DEV_BOOTSTRAP,Env:BOOTSTRAP_ADMIN_PASSWORD -ErrorAction SilentlyContinue
  $env:SERVER_ENV='staging'
- $env:E2E_API_PORT='18083'
- $env:E2E_WEB_PORT='13003'
- $env:E2E_HTTPS_PORT='13443'
+ $env:E2E_API_PORT='18085'
+ $env:E2E_WEB_PORT='13005'
+ $env:E2E_HTTPS_PORT='13445'
+ $env:SWW_E2E_LESSON_MEDIA='1'
+ $env:LESSON_MEDIA_ENABLED='true'
+ $env:LESSON_MEDIA_BROWSER_ORIGIN='http://127.0.0.2:18086'
+ $env:LESSON_MEDIA_S3_ENDPOINT=$env:LESSON_MEDIA_BROWSER_ORIGIN
+ $env:LESSON_MEDIA_S3_BUCKET='fixture'
+ $env:LESSON_MEDIA_S3_REGION='us-east-1'
+ $env:LESSON_MEDIA_S3_ACCESS_KEY='fixture'
+ $env:LESSON_MEDIA_S3_SECRET_KEY='fixture'
+ $env:LESSON_MEDIA_SCANNER_NETWORK='tcp'
+ $env:LESSON_MEDIA_SCANNER_ADDRESS='127.0.0.1:18110'
  Remove-Item Env:SMTP_HOST,Env:SMTP_PORT,Env:SMTP_USERNAME,Env:SMTP_PASSWORD,Env:SMTP_FROM -ErrorAction SilentlyContinue
  @'
 INSERT INTO users (email, password_hash, full_name, status, verified_at)
@@ -169,15 +179,15 @@ BEGIN
     UPDATE lessons SET status='PUBLISHED' WHERE id='13d0ffdf-aae1-4b72-b64c-6828436e94f1';
 END
 $$;
-'@ | & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
+'@ | & "$b/psql.exe" -h 127.0.0.1 -p 15436 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
  if($LASTEXITCODE){throw 'fixture setup failed'}
  Set-Location "$root/apps/web"
- $env:API_INTERNAL_URL='http://127.0.0.1:18083'
+ $env:API_INTERNAL_URL='http://127.0.0.1:18085'
  npm.cmd run build
  if($LASTEXITCODE){throw 'build failed'}
  npm.cmd exec -- playwright test --config playwright.academics.config.ts --output "$p/playwright"
  if($LASTEXITCODE){throw 'browser acceptance failed'}
- $counts = & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FILTER (WHERE t.slug = 'academic-fixture-a' AND s.name = '2030/2031 fixture'), count(*) FILTER (WHERE t.slug = 'academic-fixture-b' OR s.name = 'Denied fixture') FROM academic_sessions s JOIN tenants t ON t.id = s.tenant_id;"
+ $counts = & "$b/psql.exe" -h 127.0.0.1 -p 15436 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FILTER (WHERE t.slug = 'academic-fixture-a' AND s.name = '2030/2031 fixture'), count(*) FILTER (WHERE t.slug = 'academic-fixture-b' OR s.name = 'Denied fixture') FROM academic_sessions s JOIN tenants t ON t.id = s.tenant_id;"
  if($LASTEXITCODE -or $counts -ne '1|0'){throw 'Unexpected persisted academic rows'}
  'Verified one authorized session and zero denied or cross-school rows'
 } finally {

@@ -427,3 +427,43 @@ Media routes are disabled by default. Set LESSON_MEDIA_ENABLED=true with LESSON_
 Assigned authors can issue upload intents on their own draft, then complete the upload. Completion verifies and scans the bytes before attaching and rechecks write scope after scanning. An individual lesson is capped at 20 intents, pending intents can be completed for 15 minutes, and each API process permits four concurrent scans. Enrolled students can request a two-minute download only for a published lesson's attached ready object. A rejection prevents new grants. Existing grants expire on their original schedule.
 
 Disposable PostgreSQL and loopback storage/scanner protocol tests verified CSRF, teacher and student permissions, private key separation, promotion, cross-school denial and rejection. Browser upload/download and reviewer preview, object cleanup, and provider/scanner runtime checks remain open. Enabling a real bucket requires private access policy, scoped credentials and explicit browser CORS configuration.
+
+### SWW-007 student lesson attachment download control
+
+Published lesson detail reports attachment availability only when media is enabled and the attachment is ready. The student requests a fresh two-minute grant from the authorized API at click time. The download opens without a referrer, and failures show generic feedback. Disposable PostgreSQL and loopback protocol verification covered enrollment and cross-school denial, ready attachment visibility, and rejection. Frontend component tests cover the download action and denial feedback. A browser download against a real private bucket, teacher upload, reviewer preview, and object cleanup remain open.
+
+
+### SWW-007 teacher lesson attachment upload control
+
+Authors can upload a PDF, PNG or JPEG up to 8 MiB to a saved draft. The API authorizes and issues the quarantine grant, the browser transfers the file without app credentials, and the API scans and attaches it before the form reports success. Changing an attachment invalidates approval of the previous draft revision. The teaching dashboard uses a full document navigation so its upload-origin policy is applied.
+
+Set the web server's LESSON_MEDIA_BROWSER_ORIGIN to the exact storage origin used by the API's LESSON_MEDIA_S3_ENDPOINT. Use HTTPS outside loopback development. Leave it unset to disable the upload controls. Bucket CORS must allow PUT from the exact application origin with Content-Type and, when signed, X-Amz-Checksum-Sha256. Keep all object prefixes private. PostgreSQL verified the capability on an authorized draft and its absence after publication. Component tests verified the request sequence, credential isolation, origin restriction and scanner rejection feedback. End-to-end upload and download with a real private bucket and ClamAV, reviewer attachment access and object cleanup remain open.
+
+
+### SWW-007 reviewer lesson attachment access
+
+Authorized school reviewers can download a scanned attachment for the exact pending revision shown in the queue. The API rechecks tenant, active reviewer role, separation from the author, pending revision and ready storage state before issuing a two-minute grant. The queue contains no signed URL. Approval confirmation stays tied to the displayed revision. Previously issued grants retain their original expiry.
+
+Disposable PostgreSQL and loopback verification covered the authorized grant, missing session, author and student denial, cross-school denial, reviewer suspension, stale revision and approval. Browser verification with private storage and ClamAV, and cleanup of unused objects, remain open.
+
+
+### SWW-007 quarantine retention policy
+
+Configure storage lifecycle expiration for the exact quarantine/ prefix only, with a minimum age of one day. Upload grants last two minutes and completion expires after 15 minutes. The ready/ prefix receives the separately scanned object. Specify quarantine noncurrent-version expiration as well if bucket versioning is enabled. Validate the lifecycle scope in a disposable bucket before enabling it on any deployed bucket.
+
+Use a separate hostname for private storage so download navigation cannot carry the host-only app session cookies. Review the real provider's CORS, signed request behavior, and lifecycle execution with fictional data before rollout. This policy deliberately retains ready objects and their PostgreSQL metadata. Reclamation of replaced or rejected ready objects still needs an explicit retention policy and a state-aware cleanup procedure. No hosted lifecycle rule was applied.
+
+
+### SWW-007 controlled browser media acceptance
+
+The final seven Edge journeys passed using the production Next.js build, real Go API and disposable PostgreSQL. The lesson journey uploaded a fictional PDF to separate loopback storage, passed the scanner protocol fixture, downloaded and checked the exact bytes as the reviewer, approved and published, and downloaded the same PDF as an enrolled student. The storage fixture checked the upload's declared size and checksum, absence of app credentials, and the download's attachment disposition, expiry and absence of cookies and referrer. Six other school journeys passed. Actual object-provider signature enforcement, lifecycle application and ClamAV runtime remain deployment acceptance gates.
+
+
+### SWW-008 personal lesson progress
+
+Migration 000019 adds one progress record per student and lesson, with tenant-scoped foreign keys. Apply it before running the updated API. Lesson responses report Not started, In progress or Completed. The authenticated CSRF-protected update derives the student from the current active membership and enrollment in the same database statement as the write. PostgreSQL preserves the original start and completion timestamps across repeated requests. Completion cannot be undone through this endpoint.
+
+The PostgreSQL-required lesson lifecycle regression covered no session, missing CSRF, foreign school, draft and ended enrollment denial, rejection of caller-supplied student identity, zero writes on denial, and persisted progress in the student feed. The full PostgreSQL-required Go regression, vet and build passed. Assignment publication, submission, scoring and feedback remain open.
+
+
+All seven controlled Edge journeys passed in the final run. The learner started a lesson, reloaded, completed it, and reloaded again to confirm the saved state. The run also verified teacher upload and both reviewer and learner downloads after removing the dependency on a new tab. The 197 frontend tests, focused download test, security headers, and Next.js lint, type and build checks passed.

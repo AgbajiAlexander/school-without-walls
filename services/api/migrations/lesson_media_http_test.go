@@ -91,7 +91,10 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		}
 	}
 	write(`UPDATE tenants SET feature_flags='{}' WHERE id=$1`, school)
-	teacherToken, studentToken, csrf := uuid.NewString(), uuid.NewString(), uuid.NewString()
+	teacherToken, studentToken, reviewerToken, csrf := uuid.NewString(), uuid.NewString(), uuid.NewString(), uuid.NewString()
+	write(`INSERT INTO sessions (user_id,token_hash,csrf_token_hash,ip_address,user_agent,expires_at)
+	SELECT id,$1,$2,'127.0.0.1','Fixture',clock_timestamp()+interval '1 hour' FROM users WHERE email='lesson-reviewer@example.test'`,
+		auth.HashToken(reviewerToken), auth.HashToken(csrf))
 	write(`INSERT INTO sessions (user_id,token_hash,csrf_token_hash,ip_address,user_agent,expires_at) VALUES
  ($1,$2,$3,'127.0.0.1','Fixture',clock_timestamp()+interval '1 hour')`, teacher, auth.HashToken(teacherToken), auth.HashToken(csrf))
 	write(`INSERT INTO sessions (user_id,token_hash,csrf_token_hash,ip_address,user_agent,expires_at)
@@ -134,6 +137,9 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	draft := fmt.Sprintf(`{"offering_id":%q,"primary_objective_id":%q,"title":"Media fixture","content":"Fictional text"}`, offering, objective)
 	lesson := parseID(hit("POST", path, teacherToken, csrf, draft, 201))
 	edit := path + "/" + lesson.String()
+	if body := hit("GET", edit, teacherToken, "", "", 200); !strings.Contains(body, "\"media_upload_enabled\":true") {
+		t.Fatal("configured draft must expose the upload capability to its author")
+	}
 	upload := edit + "/media"
 	download := root + "/learning/lessons/" + lesson.String() + "/media"
 	intent := fmt.Sprintf(`{"media_type":"application/pdf","size_bytes":%d,"checksum_sha256":%q}`, len(data), checksum)
@@ -150,15 +156,77 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	if err := <-scanResult; err != nil || !ready.Load() {
 		t.Fatalf("scan/promotion failed: %v", err)
 	}
+	reviews := root + "/lesson-reviews"
+	review := reviews + "/" + lesson.String()
+	attachment := review + "/media?revision="
+	currentRevision := func() int64 {
+		t.Helper()
+		var result struct {
+			Data struct {
+				Items []struct {
+					ID            uuid.UUID
+					Revision      int64
+					HasAttachment bool `json:"has_attachment"`
+				}
+			}
+		}
+		body := hit("GET", reviews, reviewerToken, "", "", 200)
+		if strings.Contains(body, "X-Amz-") || json.Unmarshal([]byte(body), &result) != nil {
+			t.Fatal("invalid review queue or signed URL exposed")
+		}
+		for _, item := range result.Data.Items {
+			if item.ID == lesson && item.Revision > 0 && item.HasAttachment {
+				return item.Revision
+			}
+		}
+		t.Fatal("ready attachment missing from current pending review")
+		return 0
+	}
+	hit("POST", edit+"/submit", teacherToken, csrf, "", 200)
+	first := currentRevision()
+	link := fmt.Sprintf("%s%d", attachment, first)
+	hit("GET", link, "", "", "", 401)
+	hit("GET", link, teacherToken, "", "", 404)
+	hit("GET", link, studentToken, "", "", 404)
+	hit("GET", strings.Replace(link, "lesson-fixture-a", "lesson-fixture-b", 1), reviewerToken, "", "", 404)
+	hit("GET", review+"/media", reviewerToken, "", "", 404)
+	if body := hit("GET", link, reviewerToken, "", "", 200); !strings.Contains(body, "/ready/") || !strings.Contains(body, "X-Amz-Expires=120") {
+		t.Fatal("review grant did not restrict access to the ready prefix with short expiry")
+	}
+	write(`UPDATE memberships SET status='SUSPENDED' WHERE tenant_id=$1 AND user_id=(SELECT id FROM users WHERE email='lesson-reviewer@example.test')`, school)
+	hit("GET", link, reviewerToken, "", "", 404)
+	write(`UPDATE memberships SET status='ACTIVE' WHERE tenant_id=$1 AND user_id=(SELECT id FROM users WHERE email='lesson-reviewer@example.test')`, school)
+	hit("PATCH", edit, teacherToken, csrf, `{"title":"Revised media fixture","content":"Fictional revision"}`, 200)
+	hit("GET", link, reviewerToken, "", "", 404)
+	hit("POST", edit+"/submit", teacherToken, csrf, "", 200)
+	second := currentRevision()
+	if second <= first {
+		t.Fatal("edited review did not advance the revision")
+	}
+	hit("GET", link, reviewerToken, "", "", 404)
+	newLink := fmt.Sprintf("%s%d", attachment, second)
+	hit("GET", newLink, reviewerToken, "", "", 200)
+	hit("POST", review+"/approve", reviewerToken, csrf, fmt.Sprintf(`{"revision":%d}`, second), 200)
+	hit("GET", newLink, reviewerToken, "", "", 404)
 	hit("POST", edit+"/publish", teacherToken, csrf, "", 200)
+	if body := hit("GET", edit, teacherToken, "", "", 200); strings.Contains(body, "\"media_upload_enabled\":true") {
+		t.Fatal("published lesson must not expose the upload capability")
+	}
 	hit("GET", download, studentToken, "", "", 404)
 	enrollment := uuid.New()
 	write(`INSERT INTO enrollments (id,tenant_id,student_id,session_id,term_id,class_id)
  SELECT $1,$2,id,$3,$4,$5 FROM students WHERE tenant_id=$2`, enrollment, school, session, term, class)
+	detail := strings.TrimSuffix(download, "/media")
+	if body := hit("GET", detail, studentToken, "", "", 200); !strings.Contains(body, "\"has_attachment\":true") || strings.Contains(body, "X-Amz-") {
+		t.Fatal("lesson detail must advertise the attachment without a signed URL")
+	}
 	if body := hit("GET", download, studentToken, "", "", 200); !strings.Contains(body, "/ready/") || !strings.Contains(body, "X-Amz-Expires=120") {
 		t.Fatal("download grant was missing ready scope or expiry")
 	}
 	hit("GET", strings.Replace(download, "lesson-fixture-a", "lesson-fixture-b", 1), studentToken, "", "", 404)
 	write(`UPDATE lesson_media SET status='REJECTED' WHERE id=$1`, id)
+	if body := hit("GET", detail, studentToken, "", "", 200); strings.Contains(body, "\"has_attachment\":true") {
+		t.Fatal("rejected attachment must not be advertised")
+	}
 	hit("GET", download, studentToken, "", "", 404)
 }

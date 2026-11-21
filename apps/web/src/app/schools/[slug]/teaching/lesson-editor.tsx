@@ -3,10 +3,12 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
 
+import LessonUpload from "./lesson-upload";
+
 export type EnrichmentOption = { id: string; code: string; text: string; selected: boolean; eligible: boolean };
 
-export default function LessonEditor({ endpoint, root, csrf, offering, objectives, lesson }: {
-  endpoint: string; root: string; csrf: string; offering?: string;
+export default function LessonEditor({ endpoint, root, csrf, offering, objectives, lesson, uploadOrigin }: {
+  endpoint: string; root: string; csrf: string; offering?: string; uploadOrigin?: string;
   objectives?: { id: string; code: string; objective_text: string; enrichment?: EnrichmentOption[] }[];
   lesson?: { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string; enrichment?: EnrichmentOption[] };
 }) {
@@ -22,7 +24,9 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
   const [confirmation, setConfirmation] = useState<"publish" | "archive">();
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [writing, setWriting] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const busy = writing || uploading;
   const [blocked, setBlocked] = useState(false);
   const [previousStatus, setPreviousStatus] = useState<string>();
   const waitingForState = previousStatus === lesson?.status && previousStatus !== undefined;
@@ -31,9 +35,9 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
   const url = lesson ? `${endpoint}/${encodeURIComponent(lesson.id)}` : endpoint;
 
   async function write(action: "save" | "publish" | "archive" | "submit") {
-    if (blocked || waitingForState || inFlight.current) return;
+    if (blocked || waitingForState || uploading || inFlight.current) return;
     inFlight.current = true;
-    setBusy(true);
+    setWriting(true);
     setError("");
     setNotice("");
     try {
@@ -66,7 +70,7 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
       setError("The change could not be confirmed. Refresh before trying again.");
     } finally {
       inFlight.current = false;
-      setBusy(false);
+      setWriting(false);
     }
   }
   function save(event: FormEvent<HTMLFormElement>) {
@@ -101,6 +105,11 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
           <button type="submit" className="min-h-11 rounded bg-green-800 px-3 text-white">{busy ? "Savingâ€¦" : lesson ? "Save changes" : "Save lesson draft"}</button>
         </fieldset>
       </form> : <div className="whitespace-pre-wrap break-words">{lesson.content}</div>}
+      {lesson?.status === "DRAFT" && uploadOrigin && (
+        <LessonUpload endpoint={url + "/media"} csrf={csrf} origin={uploadOrigin}
+          disabled={writing || blocked || unsubmitted || !!confirmation} onBusy={setUploading}
+          onAttached={() => router.refresh()} />
+      )}
       {lesson?.status === "DRAFT" && lesson.review_required && (
         <div className="space-y-2">
           {lesson.review_status === "PENDING" ? <p>Awaiting approval.</p>

@@ -26,6 +26,8 @@ type Handler struct {
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{pool: pool} }
 
 type publishedLesson struct {
+	ProgressState string             `json:"progress_state"`
+	HasAttachment bool               `json:"has_attachment,omitempty"`
 	ID            uuid.UUID          `json:"id"`
 	Title         string             `json:"title"`
 	Subject       string             `json:"subject"`
@@ -51,7 +53,10 @@ const lessonEnrichmentDetails = `(
 const studentLessonQuery = `
 	SELECT l.id,l.title,subject.name AS subject,objective.code AS objective_code,l.published_at,
 		CASE WHEN $3::uuid IS NOT NULL THEN l.content END AS content,
-		CASE WHEN $3::uuid IS NOT NULL THEN ` + lessonEnrichmentDetails + ` END AS enrichment` + studentLessonScope + ` ORDER BY l.id LIMIT 51`
+		CASE WHEN $3::uuid IS NOT NULL THEN ` + lessonEnrichmentDetails + ` END AS enrichment,
+		($5::boolean AND $3::uuid IS NOT NULL AND ` + readyLessonAttachment + `) AS has_attachment,
+		COALESCE((SELECT ` + progressState + ` FROM lesson_progress progress
+			WHERE progress.tenant_id=t.id AND progress.lesson_id=l.id AND progress.student_id=s.id), 'NOT_STARTED') AS progress_state` + studentLessonScope + ` ORDER BY l.id LIMIT 51`
 
 const studentLessonScope = `
 	FROM tenants t JOIN users u ON u.id=$2 AND u.status='ACTIVE'
@@ -105,7 +110,7 @@ func (h *Handler) studentLessons(w http.ResponseWriter, r *http.Request, id *uui
 		}
 		after = &cursor
 	}
-	rows, err := h.pool.Query(r.Context(), studentLessonQuery, chi.URLParam(r, "slug"), actor.ID, id, after)
+	rows, err := h.pool.Query(r.Context(), studentLessonQuery, chi.URLParam(r, "slug"), actor.ID, id, after, h.mediaStore != nil)
 	if err != nil {
 		lessonReadError(w, r, err)
 		return
