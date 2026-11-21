@@ -104,6 +104,28 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	run("", attach, stale, []uuid.UUID{alignment})
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, english)
 	run("23514", publish, stale)
+	mediaLesson, clean, otherObject := uuid.New(), uuid.New(), uuid.New()
+	run("", create, mediaLesson, school, offering, membership, replacement, secondObjective)
+	const media = `INSERT INTO lesson_media (id,tenant_id,lesson_id,media_type,size_bytes)
+		VALUES ($1,$2,$3,$4,$5)`
+	run("23503", media, clean, foreign, mediaLesson, "application/pdf", 30)
+	run("23514", media, clean, school, mediaLesson, "text/html", 30)
+	run("23514", media, clean, school, mediaLesson, "application/pdf", 8388609)
+	run("", media, clean, school, mediaLesson, "application/pdf", 30)
+	const setAttachment = `UPDATE lessons SET media_id=$2 WHERE id=$1`
+	run("23514", setAttachment, mediaLesson, clean)
+	run("", media, otherObject, school, stale, "image/png", 40)
+	run("", `UPDATE lesson_media SET status='READY' WHERE id IN ($1,$2)`, clean, otherObject)
+	run("23514", setAttachment, mediaLesson, otherObject)
+	run("", setAttachment, mediaLesson, clean)
+	var mediaRevision int
+	if err := pool.QueryRow(ctx, `SELECT content_revision FROM lessons WHERE id=$1`, mediaLesson).Scan(&mediaRevision); err != nil || mediaRevision != 2 {
+		t.Fatal("attaching scanned media must invalidate prior lesson review")
+	}
+	run("", publish, mediaLesson)
+	run("23514", setAttachment, mediaLesson, nil)
+	run("", `UPDATE lesson_media SET status='REJECTED' WHERE id=$1`, clean)
+	run("23514", `UPDATE lesson_media SET status='READY' WHERE id=$1`, clean)
 	testTeacherLessonHTTP(t, ctx, pool, school, user, membership, offering, secondObjective, firstObjective)
 	run("23514", `UPDATE lessons SET content='changed' WHERE id=$1`, lesson)
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, first)
