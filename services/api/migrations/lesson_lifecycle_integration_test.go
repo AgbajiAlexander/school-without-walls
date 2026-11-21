@@ -73,6 +73,7 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		t.Fatal("publication must retain the original edition selection")
 	}
 	testStudentLessonHTTP(t, ctx, pool, school, session, term, class, lesson, pending)
+	testTeacherLessonHTTP(t, ctx, pool, school, user, membership, offering, secondObjective, firstObjective)
 	run("23514", `UPDATE lessons SET content='changed' WHERE id=$1`, lesson)
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, first)
 	run("23514", publish, pending)

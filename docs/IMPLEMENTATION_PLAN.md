@@ -369,3 +369,9 @@ The disposable PostgreSQL regression verified wrong-school and wrong-edition den
 The lesson feed and direct lesson reads use the same tenant-scoped authorization query. It checks active learner identity, STUDENT membership, linked student profile, enrollment, school session, local term dates, class or arm, offering, and publication time. The feed returns bounded summaries and the detail route returns plain lesson text only for eligible students. Ending an enrollment blocks subsequent reads.
 
 The PostgreSQL HTTP regression covered an anonymous request, direct access before and after enrollment, published summaries, draft exclusion, cross-school denial, and access after enrollment ends. The teacher API and the student browser workflow remain open.
+
+### SWW-007 teacher lesson write API
+
+Teachers with an active offering assignment can create and edit their own plain-text lesson drafts, publish eligible drafts, and archive published lessons. Go rechecks the active actor, tenant, membership, assignment, and offering under row locks. The current primary curriculum selection is resolved on the server at creation. Draft edits, publication, and archival preserve the pinned curriculum reference. Each successful mutation records a tenant audit event in the same transaction.
+
+PostgreSQL HTTP coverage exercises the assignment gate, missing CSRF, cross-school denial, stale curriculum objective, draft editing, assignment revocation, one-time publication, published-text immutability, and archival. Teacher browsing and the classroom dashboards remain open, as do optional review, enrichment links, and media.
