@@ -221,6 +221,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			v1.With(auth.RequireAuth).Get("/curriculum/frameworks", curriculumH.ListFrameworks)
 			v1.With(auth.RequireAuth).Get("/curriculum/objectives", curriculumH.ListObjectives)
 			v1.With(auth.RequireAuth).Get("/curriculum/alignments", curriculumH.ListVerifiedAlignments)
+			v1.With(auth.RequireAuth).Get("/curriculum/alignments/drafts", curriculumH.ListDraftAlignments)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments", curriculumH.CreateAlignment)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments/{alignmentID}/review", curriculumH.ReviewAlignment)
 		}

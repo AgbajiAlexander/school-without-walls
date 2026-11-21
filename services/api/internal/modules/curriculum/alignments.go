@@ -48,7 +48,7 @@ func (h *Handler) ListVerifiedAlignments(w http.ResponseWriter, r *http.Request)
 		invalidQuery(w, r)
 		return
 	}
-	browse(h, w, r, pgx.RowToStructByName[verifiedAlignment], func(a verifiedAlignment) uuid.UUID { return a.ID },
+	browse(h, w, r, memberAccess, pgx.RowToStructByName[verifiedAlignment], func(a verifiedAlignment) uuid.UUID { return a.ID },
 		`SELECT a.id, a.primary_objective_id, a.related_objective_id, a.relation, a.reviewed_at,
 			o.code AS related_code, o.objective_text AS related_text, f.title AS framework_title,
 			f.edition AS framework_edition, f.publisher AS framework_publisher,
@@ -58,6 +58,37 @@ func (h *Handler) ListVerifiedAlignments(w http.ResponseWriter, r *http.Request)
 		JOIN curriculum_framework_versions f ON f.id = o.framework_version_id
 		WHERE a.primary_objective_id = $3 AND ($1::uuid IS NULL OR a.id > $1)
 		ORDER BY a.id LIMIT $2`, []any{id})
+}
+
+type draftAlignment struct {
+	ID               uuid.UUID `json:"id"`
+	Relation         string    `json:"relation"`
+	PrimaryCode      string    `json:"primary_code"`
+	PrimaryText      string    `json:"primary_text"`
+	PrimaryFramework string    `json:"primary_framework"`
+	PrimaryEdition   string    `json:"primary_edition"`
+	PrimaryStatus    string    `json:"primary_status"`
+	RelatedCode      string    `json:"related_code"`
+	RelatedText      string    `json:"related_text"`
+	RelatedFramework string    `json:"related_framework"`
+	RelatedEdition   string    `json:"related_edition"`
+	RelatedStatus    string    `json:"related_status"`
+}
+
+func (h *Handler) ListDraftAlignments(w http.ResponseWriter, r *http.Request) {
+	browse(h, w, r, reviewerAccess, pgx.RowToStructByName[draftAlignment], func(a draftAlignment) uuid.UUID { return a.ID },
+		`SELECT a.id, a.relation,
+			p.code AS primary_code, p.objective_text AS primary_text, pf.title AS primary_framework,
+			pf.edition AS primary_edition, pf.status AS primary_status,
+			r.code AS related_code, r.objective_text AS related_text, rf.title AS related_framework,
+			rf.edition AS related_edition, rf.status AS related_status
+		FROM curriculum_objective_alignments a
+		JOIN curriculum_objectives p ON p.id = a.primary_objective_id
+		JOIN curriculum_framework_versions pf ON pf.id = p.framework_version_id
+		JOIN curriculum_objectives r ON r.id = a.related_objective_id
+		JOIN curriculum_framework_versions rf ON rf.id = r.framework_version_id
+		WHERE a.review_status = 'DRAFT' AND ($1::uuid IS NULL OR a.id > $1)
+		ORDER BY a.id LIMIT $2`, nil)
 }
 
 func (h *Handler) CreateAlignment(w http.ResponseWriter, r *http.Request) {

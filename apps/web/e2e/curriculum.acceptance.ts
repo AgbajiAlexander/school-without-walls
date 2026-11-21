@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test";
 
-test("a school member browses published editions and filters objectives on mobile", async ({ page }) => {
+test("a school member browses published editions and filters objectives on mobile", async ({ page, browser, baseURL }) => {
   const password = process.env.E2E_ADMIN_PASSWORD;
   if (!password) throw new Error("Fictional fixture password is required");
   await page.setViewportSize({ width: 360, height: 800 });
@@ -37,4 +37,34 @@ test("a school member browses published editions and filters objectives on mobil
   await page.getByLabel("Education stage").selectOption("SENIOR_SECONDARY");
   await page.getByRole("button", { name: "Filter objectives" }).click();
   await expect(page.getByRole("status")).toHaveText("No published objectives match this selection.");
+
+  await page.goto("/platform/curriculum");
+  await expect(page.getByRole("status")).toHaveText("Global curriculum administrator access required.");
+  await expect(page.getByText("Fictional draft alignment text.")).toHaveCount(0);
+
+  const operator = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
+  try {
+    const review = await operator.newPage();
+    await review.goto("/login");
+    await review.getByLabel("Email Address").fill("academic-reviewer@example.test");
+    await review.getByLabel("Password", { exact: true }).fill(password);
+    await review.getByRole("button", { name: "Sign in" }).click();
+    await expect(review).toHaveURL(/\/dashboard$/);
+    await review.goto("/platform/tenants");
+    await review.getByRole("link", { name: "Curriculum alignment review" }).click();
+    await expect(review.getByText("Fictional draft alignment text.")).toBeVisible();
+    await review.getByRole("button", { name: "Review mapping FIX.COUNT to FIX.DRAFT" }).click();
+    await expect(review.getByText("Make this mapping visible as verified enrichment?")).toBeVisible();
+    await review.getByRole("button", { name: "Confirm approval" }).click();
+    await expect(review.getByText("Alignment approved.")).toBeVisible();
+    await review.reload();
+    await expect(review.getByText("No draft mappings on this page.")).toBeVisible();
+  } finally {
+    await operator.close();
+  }
+
+  await page.goto("/curriculum");
+  await nigeria.getByRole("link", { name: /Browse objectives/ }).click();
+  await page.getByRole("link", { name: "Verified enrichment for FIX.COUNT" }).click();
+  await expect(page.getByText("Fictional draft alignment text.")).toBeVisible();
 });

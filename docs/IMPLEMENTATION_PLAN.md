@@ -319,3 +319,11 @@ Members can open verified enrichment for a published Nigerian objective. The bro
 The full Go suite with PostgreSQL required, Go vet and build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against the real API and disposable PostgreSQL. The curriculum journey confirmed the optional enrichment label, provenance link, draft exclusion, and return to the selected stage.
 
 The platform review interface, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 platform alignment review queue
+
+Platform administrators can inspect paginated drafts from the platform dashboard and explicitly approve a mapping after comparing the objectives, relation and edition status. The API checks the existing global grant before returning drafts and independently enforces authorization, CSRF, and the published-edition requirement on approval. Draft creation remains available through the existing API.
+
+PostgreSQL HTTP coverage verified operator-only queue access, removal after approval, and denial after grant revocation. The full Go suite with PostgreSQL required, vet, build, 189 frontend tests, TypeScript, lint, and the production build passed. The six Edge journeys passed against the real API and disposable PostgreSQL. A school member was denied draft access, a separate operator approved the draft through the confirmation UI, and the member then saw the verified mapping.
+
+School-session edition selection and rights-reviewed content remain open.

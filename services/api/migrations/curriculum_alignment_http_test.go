@@ -76,6 +76,30 @@ func testCurriculumAlignmentHTTP(t *testing.T, ctx context.Context, pool *pgxpoo
 		t.Fatal("draft response omitted alignment ID")
 	}
 	send("POST", alignments, operatorToken, csrf, payload, 409)
+	queue := alignments + "/drafts"
+	send("GET", queue, "", "", "", 401)
+	send("GET", queue, principalToken, "", "", 403)
+	var draftsPage struct {
+		Data struct {
+			Items []struct {
+				ID            uuid.UUID
+				PrimaryStatus string `json:"primary_status"`
+				RelatedText   string `json:"related_text"`
+			}
+		}
+	}
+	if err := json.Unmarshal(send("GET", queue, operatorToken, "", "", 200), &draftsPage); err != nil {
+		t.Fatal("invalid review queue response")
+	}
+	found := false
+	for _, item := range draftsPage.Data.Items {
+		if item.ID == result.Data.ID && item.PrimaryStatus == "DRAFT" && item.RelatedText == "Fictional enrichment objective" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("review queue omitted the draft or its edition state")
+	}
 	list := alignments + "?primary_objective_id=" + primary.String()
 	assertVisible := func(want int) {
 		t.Helper()
@@ -104,11 +128,15 @@ func testCurriculumAlignmentHTTP(t *testing.T, ctx context.Context, pool *pgxpoo
 	send("POST", review, operatorToken, csrf, "{}", 409)
 	write(`UPDATE curriculum_framework_versions SET status='PUBLISHED' WHERE id IN ($1,$2)`, primaryEdition, relatedEdition)
 	send("POST", review, operatorToken, csrf, "{}", 200)
+	if body := send("GET", queue, operatorToken, "", "", 200); strings.Contains(string(body), result.Data.ID.String()) {
+		t.Fatal("approved mapping remained in draft queue")
+	}
 	send("POST", review, operatorToken, csrf, "{}", 409)
 	assertVisible(1)
 	write(`UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, relatedEdition)
 	assertVisible(0)
 	write(`DELETE FROM platform_admins WHERE user_id=$1`, operator)
+	send("GET", queue, operatorToken, "", "", 403)
 	send("POST", alignments, operatorToken, csrf, payload, 403)
 
 	var drafts, reviews, otherActors int

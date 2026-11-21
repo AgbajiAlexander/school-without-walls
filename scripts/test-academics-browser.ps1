@@ -46,9 +46,12 @@ INSERT INTO users (email, password_hash, full_name, status, verified_at)
 SELECT fixture.email, password_hash, fixture.name, 'ACTIVE', CURRENT_TIMESTAMP
 FROM users CROSS JOIN (VALUES
     ('academic-teacher@example.test', 'Fictional Teacher'),
-    ('academic-curriculum@example.test', 'Fictional Curriculum Member')
+    ('academic-curriculum@example.test', 'Fictional Curriculum Member'),
+    ('academic-reviewer@example.test', 'Fictional Curriculum Reviewer')
 ) AS fixture(email, name)
 WHERE users.email = 'academic-owner@example.test';
+INSERT INTO platform_admins (user_id)
+SELECT id FROM users WHERE email = 'academic-reviewer@example.test';
 INSERT INTO tenants (id, slug, name, status) VALUES
 (gen_random_uuid(), 'academic-fixture-a', 'Fictional Academic School A', 'ACTIVE'),
 (gen_random_uuid(), 'academic-fixture-b', 'Fictional Academic School B', 'ACTIVE');

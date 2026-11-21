@@ -16,7 +16,30 @@ import (
 
 const pageSize = 50
 
-var errMembershipRequired = errors.New("active school membership required")
+var errCatalogAccess = errors.New("curriculum access required")
+
+type catalogAccess struct {
+	query  string
+	denial string
+}
+
+var memberAccess = catalogAccess{
+	query: `SELECT EXISTS (
+		SELECT 1 FROM memberships m
+		JOIN tenants t ON t.id = m.tenant_id
+		JOIN users u ON u.id = m.user_id
+		WHERE m.user_id = $1 AND m.status = 'ACTIVE' AND t.status = 'ACTIVE' AND u.status = 'ACTIVE'
+	)`,
+	denial: "Active school membership required",
+}
+
+var reviewerAccess = catalogAccess{
+	query: `SELECT EXISTS (
+		SELECT 1 FROM platform_admins p JOIN users u ON u.id = p.user_id
+		WHERE u.id = $1 AND u.status = 'ACTIVE'
+	)`,
+	denial: "Global curriculum administrator access required",
+}
 
 type Handler struct{ pool *pgxpool.Pool }
 
@@ -49,7 +72,7 @@ type objective struct {
 }
 
 func (h *Handler) ListFrameworks(w http.ResponseWriter, r *http.Request) {
-	browse(h, w, r, pgx.RowToStructByName[framework], func(item framework) uuid.UUID { return item.ID },
+	browse(h, w, r, memberAccess, pgx.RowToStructByName[framework], func(item framework) uuid.UUID { return item.ID },
 		`SELECT id, jurisdiction, publisher, title, edition, framework_kind,
 			to_char(effective_from, 'YYYY-MM-DD') AS effective_from,
 			to_char(effective_to, 'YYYY-MM-DD') AS effective_to, source_url, license_note, status
@@ -73,7 +96,7 @@ func (h *Handler) ListObjectives(w http.ResponseWriter, r *http.Request) {
 		invalidQuery(w, r)
 		return
 	}
-	browse(h, w, r, pgx.RowToStructByName[objective], func(item objective) uuid.UUID { return item.ID },
+	browse(h, w, r, memberAccess, pgx.RowToStructByName[objective], func(item objective) uuid.UUID { return item.ID },
 		`SELECT o.id, o.framework_version_id, o.stage, o.grade_band, o.subject, o.strand, o.code, o.objective_text, f.framework_kind
 		  FROM curriculum_objectives o JOIN curriculum_framework_versions f ON f.id = o.framework_version_id
 		  WHERE f.status = 'PUBLISHED' AND o.framework_version_id = $3
@@ -81,7 +104,7 @@ func (h *Handler) ListObjectives(w http.ResponseWriter, r *http.Request) {
 		  ORDER BY o.id LIMIT $2`, []any{id, stage})
 }
 
-func browse[T any](h *Handler, w http.ResponseWriter, r *http.Request,
+func browse[T any](h *Handler, w http.ResponseWriter, r *http.Request, access catalogAccess,
 	scan pgx.RowToFunc[T], identify func(T) uuid.UUID, query string, filters []any,
 ) {
 	w.Header().Set("Cache-Control", "no-store")
@@ -99,9 +122,9 @@ func browse[T any](h *Handler, w http.ResponseWriter, r *http.Request,
 		}
 		after = &id
 	}
-	items, err := readCatalog(r.Context(), h.pool, user.ID, scan, query, append([]any{after, pageSize + 1}, filters...))
-	if errors.Is(err, errMembershipRequired) {
-		response.ErrorJSON(w, r, http.StatusForbidden, response.ErrCodeForbidden, "Active school membership required", nil)
+	items, err := readCatalog(r.Context(), h.pool, user.ID, access, scan, query, append([]any{after, pageSize + 1}, filters...))
+	if errors.Is(err, errCatalogAccess) {
+		response.ErrorJSON(w, r, http.StatusForbidden, response.ErrCodeForbidden, access.denial, nil)
 		return
 	}
 	if err != nil {
@@ -121,7 +144,7 @@ func browse[T any](h *Handler, w http.ResponseWriter, r *http.Request,
 	}{Items: items, Next: next})
 }
 
-func readCatalog[T any](ctx context.Context, pool *pgxpool.Pool, actor uuid.UUID,
+func readCatalog[T any](ctx context.Context, pool *pgxpool.Pool, actor uuid.UUID, access catalogAccess,
 	scan pgx.RowToFunc[T], query string, args []any,
 ) ([]T, error) {
 	// Authorization and the catalog read share a snapshot. A committed
@@ -133,17 +156,12 @@ func readCatalog[T any](ctx context.Context, pool *pgxpool.Pool, actor uuid.UUID
 	defer tx.Rollback(ctx)
 
 	var allowed bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS (
-		SELECT 1 FROM memberships m
-		JOIN tenants t ON t.id = m.tenant_id
-		JOIN users u ON u.id = m.user_id
-		WHERE m.user_id = $1 AND m.status = 'ACTIVE' AND t.status = 'ACTIVE' AND u.status = 'ACTIVE'
-	)`, actor).Scan(&allowed)
+	err = tx.QueryRow(ctx, access.query, actor).Scan(&allowed)
 	if err != nil {
 		return nil, err
 	}
 	if !allowed {
-		return nil, errMembershipRequired
+		return nil, errCatalogAccess
 	}
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
