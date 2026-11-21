@@ -413,3 +413,9 @@ Teachers can select verified optional enrichment for the primary objective, and 
 Migration 000017 records private lesson objects against the same tenant and lesson. Metadata limits declared content type to PDF, PNG or JPEG and size to 8 MiB. Objects start in quarantine. Only ready media can be attached or published, attachment changes advance the lesson approval revision, and published lessons retain the attachment reference. A ready object can be marked rejected to support later safety revocation.
 
 The disposable PostgreSQL regression verified quarantine, invalid type and size, wrong-school and wrong-lesson rejection, revision invalidation, immutable publication and revocation. This migration stores metadata and enforces database state. The private S3-compatible storage adapter, actual scanning, signed access, runtime authorization, and browser controls still need implementation and verification. Docker Desktop's engine was unavailable during this local check.
+
+### SWW-007 private object and scanner adapters
+
+The private S3-compatible adapter creates two-minute upload grants scoped to quarantine and bound to the declared size and SHA-256 checksum. Promotion verifies the bytes and declared media type, requires a clean scanner response, and writes exactly the scanned bytes to a separate ready prefix using a conditional write. A retry checks an existing ready object against the expected checksum. Download signing targets only the ready prefix and requests attachment disposition and no-store caching.
+
+The ClamAV adapter uses bounded INSTREAM framing and rejects malformed replies, scan errors, and timeouts. Loopback protocol tests exercised signing, checksum/size binding, failed scan, clean promotion, and a retry. Real object-store bucket policy, CORS, actual ClamAV operation, authenticated media routes and browser controls remain open. The adapters are not registered in the API yet.
