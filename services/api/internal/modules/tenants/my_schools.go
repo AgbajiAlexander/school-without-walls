@@ -14,18 +14,7 @@ func (r *postgresRepository) ListForMember(
 	ctx context.Context,
 	userID uuid.UUID,
 ) ([]Tenant, error) {
-	rows, err := r.pool.Query(ctx, `
-        SELECT t.id, t.slug::text, t.name, t.status::text,
-               t.locale, t.timezone, t.branding, t.feature_flags,
-               t.education_stages, t.created_at, t.updated_at,
-               m.role
-        FROM tenants t
-        JOIN memberships m ON m.tenant_id = t.id
-        WHERE m.user_id = $1
-          AND m.status = 'ACTIVE'
-          AND t.status = 'ACTIVE'
-        ORDER BY t.name, t.id
-    `, userID)
+	rows, err := r.pool.Query(ctx, memberSchoolQuery+` GROUP BY t.id ORDER BY t.name, t.id`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("list member schools: %w", err)
 	}
@@ -62,6 +51,11 @@ func (m *MockRepository) ListForMember(
 			continue
 		}
 		tenant.CurrentRole = role
+		tenant.CanInviteStaff = role == "SCHOOL_OWNER"
+		tenant.CanManageAcademics = mockCanManageAcademics(role)
+		tenant.CanReadLessons = role == "STUDENT"
+		tenant.CanTeachLessons = role == "TEACHER"
+		tenant.CanManageLessonReview = role == "SCHOOL_OWNER" || role == "SCHOOL_ADMIN"
 		result = append(result, tenant)
 	}
 	return result, nil

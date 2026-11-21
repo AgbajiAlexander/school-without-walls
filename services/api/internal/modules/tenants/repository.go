@@ -5,20 +5,30 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/auth"
 )
 
 type postgresRepository struct {
-	pool *pgxpool.Pool
+	pool        *pgxpool.Pool
+	staffLimits config.StaffInvitationLimits
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool) Repository {
-	return &postgresRepository{pool: pool}
+	return NewPostgresRepositoryWithStaffLimits(pool, config.DefaultStaffInvitationLimits())
+}
+
+func NewPostgresRepositoryWithStaffLimits(pool *pgxpool.Pool, limits config.StaffInvitationLimits) Repository {
+	if limits == (config.StaffInvitationLimits{}) {
+		limits = config.DefaultStaffInvitationLimits()
+	}
+	return &postgresRepository{pool: pool, staffLimits: limits}
 }
 
 func (r *postgresRepository) IsPlatformAdmin(ctx context.Context, userID uuid.UUID) (bool, error) {
@@ -127,16 +137,19 @@ func (r *postgresRepository) List(ctx context.Context) ([]Tenant, error) {
 	return tenants, nil
 }
 
+const memberSchoolQuery = `
+	SELECT t.id, t.slug::text, t.name, t.status::text, t.locale, t.timezone,
+		t.branding, t.feature_flags, t.education_stages, t.created_at, t.updated_at,
+		MIN(m.role), BOOL_OR(m.role = 'SCHOOL_OWNER'),
+		BOOL_OR(m.role IN ('SCHOOL_OWNER', 'SCHOOL_ADMIN', 'PRINCIPAL')), BOOL_OR(m.role = 'STUDENT'), BOOL_OR(m.role = 'TEACHER'), BOOL_OR(m.role IN ('SCHOOL_OWNER','SCHOOL_ADMIN'))
+	FROM tenants t
+	JOIN memberships m ON m.tenant_id = t.id
+	JOIN users u ON u.id = m.user_id
+	WHERE m.user_id = $1 AND m.status = 'ACTIVE' AND t.status = 'ACTIVE' AND u.status = 'ACTIVE'
+`
+
 func (r *postgresRepository) GetForMember(ctx context.Context, slug string, userID uuid.UUID) (*Tenant, error) {
-	row := r.pool.QueryRow(ctx, `
-		SELECT t.id, t.slug::text, t.name, t.status::text, t.locale, t.timezone,
-			t.branding, t.feature_flags, t.education_stages, t.created_at, t.updated_at,
-			m.role
-		FROM tenants t
-		JOIN memberships m ON m.tenant_id = t.id
-		WHERE t.slug = $1 AND m.user_id = $2 AND m.status = 'ACTIVE'
-			AND t.status = 'ACTIVE'
-	`, slug, userID)
+	row := r.pool.QueryRow(ctx, memberSchoolQuery+` AND t.slug = $2 GROUP BY t.id`, userID, slug)
 	tenant, err := scanTenantWithRole(row)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
@@ -216,7 +229,7 @@ func scanTenantWithRole(row rowScanner) (*Tenant, error) {
 	err := row.Scan(
 		&tenant.ID, &tenant.Slug, &tenant.Name, &tenant.Status, &tenant.Locale,
 		&tenant.Timezone, &branding, &flags, &tenant.EducationStages,
-		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole,
+		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole, &tenant.CanInviteStaff, &tenant.CanManageAcademics, &tenant.CanReadLessons, &tenant.CanTeachLessons, &tenant.CanManageLessonReview,
 	)
 	if err != nil {
 		return nil, err
@@ -238,10 +251,14 @@ func writeAuditEvent(ctx context.Context, tx pgx.Tx, event *auth.AuditEvent) err
 	if err != nil {
 		return fmt.Errorf("encode tenant audit metadata: %w", err)
 	}
+	var createdAt *time.Time
+	if !event.CreatedAt.IsZero() {
+		createdAt = &event.CreatedAt
+	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO audit_events (id, tenant_id, actor_id, action, subject_type, subject_id, request_id, metadata_redacted, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
-	`, event.ID, event.TenantID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, CURRENT_TIMESTAMP))
+	`, event.ID, event.TenantID, event.ActorID, event.Action, event.SubjectType, event.SubjectID, event.RequestID, metadata, createdAt)
 	if err != nil {
 		return fmt.Errorf("write tenant audit event: %w", err)
 	}

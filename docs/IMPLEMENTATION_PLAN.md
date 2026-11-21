@@ -13,11 +13,11 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | [x] SWW-003H-C2 | Real frontend API readiness and component tests | Same-origin bounded readiness endpoint and accessible status states pass route/component tests | 003H-C1 |
 | [x] SWW-003H-C3 | Real-browser authentication and CSP verification | Production frontend, Go API and isolated PostgreSQL pass HTTPS cookie, auth, CSRF and browser CSP tests | 003H-C2 |
 | [x] SWW-003H-C4 | Frontend and browser CI integration | Existing Go/PostgreSQL checks remain intact; random masked CI DB credentials and frontend/browser jobs pass | 003H-C2, 003H-C3 |
-| [ ] SWW-004A | Academic session and term lifecycle API/database | Three ordered valid terms; tenant isolation; one active session; atomic audit; PostgreSQL integration and concurrency checks pass | 003 |
+| [x] SWW-004A | Academic session and term lifecycle API/database | Three ordered valid terms; tenant isolation; one active session; atomic audit; PostgreSQL integration and concurrency checks pass | 003 |
 | SWW-004B | Levels, classes and arms | School-configurable levels/classes with tenant-aware constraints and access tests | 004A |
 | SWW-004C | Subjects, offerings and teacher assignments | Same-tenant active teacher assignments; tenant constraints and access tests | 004B |
-| SWW-004D | Responsive academic management workflow | Server-verified school context; accessible lifecycle states; real API E2E passes | 004A, 004B, 004C |
-| SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004D |
+| [x] SWW-004D | Responsive academic management workflow | Server-verified school context; accessible lifecycle states; real API E2E passes | 004A, 004B, 004C |
+| [x] SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004D |
 | SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004C |
 | SWW-007 | Teacher lessons + student reading | Published lesson available to enrolled learner only; responsive text-first UI | 005,006 |
 | SWW-008 | Assignment/submission/feedback/progress | Student submission, teacher feedback, score constraints, access tests | 007 |
@@ -26,6 +26,82 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-011 | Early Years observations + parental dashboard | Qualitative reports; child-specific view; no forced numeric mark | 005,010 |
 | SWW-012 | Go AI gateway + teacher drafts + student tutor | No exposed secrets, age/tenant gating, human review, safety tests | 006,007 |
 | SWW-013 | E2E hardening, docs, deployment | CI/E2E/security/mobile checks; Vercel + Go HTTPS; backup restore tested | All |
+
+### SWW-004F-B9 session scope and acceptance
+
+On 20 November 2026 the project owner authorized SWW-004F-B9 on `feature/SWW-004F-subjects-offerings-assignments` ahead of the existing milestone order. Prior acceptance history and checklist entries still apply. This slice verifies the current endpoint policy: an active School Owner may invite School Administrators and Principals within their own active tenant.
+
+- [x] Verify PostgreSQL-backed HTTP authorization, conflicts, token hashing, audit, delivery recovery, staff token redemption and owner activation on isolated `sww_structure_test`. The project owner reported that Terminal 3 passed both complete staff suites with PostgreSQL required, the expiration lock-wait case five consecutive times, and the full Go regression, vet and build.
+- The staff create transaction locks the tenant and performs a non-locking lookup of existing invitations. Acceptance locks the existing invitation, tenant, user and existing memberships in that order. Staff creation inserts a new invitation row, so the reverse tenant/invitation order does not itself establish a cycle between those two paths. Owner delivery rollback locks the invitation before updating its tenant.
+- At PostgreSQL's default Read Committed isolation, the pending-token predicate and row lock arbitrate concurrent token redemption. The tenant lock serializes acceptance with tenant state updates, and existing membership locks serialize updates to rows acceptance observes. The membership uniqueness constraint protects the same tenant, user and role even when an insert races.
+- A read of existing memberships cannot lock an absent row. Future membership writers should acquire the tenant and user locks in a consistent order, especially for suspended memberships of a different role. Existing-owner authorization at issuance also reads membership status without a row lock. Cross-tenant first-time acceptance for the same email can contend on the global email constraint and fail transiently. These interleavings need coordinated database tests before claiming race safety.
+- The expiry regression confirmed that an invitation could be accepted after its deadline while waiting for the tenant lock. Acceptance now uses `clock_timestamp()` for both expiry checks, with the final check after the invitation, tenant, user and membership lock waits and before granting access.
+- Before B13, delivery happened after a redeemable token was committed. Failed revocation or concurrent redemption could leave access granted. B13 added the database delivery gate.
+
+### SWW-004F-B10 staff onboarding verification
+
+- [x] Automated backend verification. The project owner confirmed the expanded staff invitation HTTP workflow passed with PostgreSQL required in Terminal 3 against isolated `sww_structure_test`. It covers captured mail, redemption, a fresh login, dashboard membership and school API permissions, cross-school and owner-only denials, replay, expiry, and a pending second invitation after membership suspension.
+- The invitation page uses role-neutral school copy and replaces the invitation URL after successful redemption. Verification, acceptance, and authenticated mail capture responses use `Cache-Control: no-store`. See B13 for the remaining delivery and lock-order risks.
+- Local checks passed for Go regression, vet and build, 163 frontend tests, four security-header tests, frontend lint and typecheck, and the Next.js production build. The expanded PostgreSQL workflow compiled and skipped because the Codex terminal lacked `SWW_TEST_DATABASE_URL`. The workflow exercises the real API and dashboard data endpoints. The invitation page has separate component coverage.
+
+- B12 completed the local browser-level E2E journey. B13 records the delivery-risk review and remaining operational risks.
+
+### SWW-004F-B11 School Owner staff invitation interface
+
+- [x] Controlled local browser demonstration of the owner-only Invite Staff action using fictional addresses and local mail capture. See B12 evidence below.
+- The dashboard links to the selected school's invitation form. School settings verify the active membership through the API before showing the form, and the invitation endpoint rechecks authorization on submission. The form reports success only after a matching HTTP 201 receipt.
+- Frontend verification passed with 175 tests, including 12 invitation interface cases, four security-header tests, TypeScript checking, lint, and the Next.js production build.
+
+### SWW-004F-B12 controlled browser demonstration
+
+- [x] Playwright ran one complete Microsoft Edge journey with both staff roles against a production Next.js build, the real Go router, disposable PostgreSQL 18, and in-memory mail capture. Two fictional schools and all accounts were created inside the isolated fixture. The web, API, and PostgreSQL used loopback ports 13000, 18080, and 15432 respectively.
+- Edge verified one captured message per recipient, successful activation and fresh sign-in, the expected dashboard role, permitted academic session creation, cross-school and owner-only denials, and replay rejection. The owner form showed validation, duplicate invitation, authorization, session expiry, network, pending submission, and success states. An intercepted in-flight request was held while switching schools to verify that form state cleared.
+- The journey checked that the acceptance response did not echo the password, invitation token or session cookie, and that the invite URL was replaced after redemption. It also checked browser console output, browser storage and JavaScript cookie visibility for the tested invitation secrets. The fixture used local HTTP and did not exercise deployed HTTPS or SMTP behavior.
+- The browser command is `node node_modules/@playwright/test/cli.js test --config playwright.staff.config.ts` from `apps/web`. The configuration expects a production build in a separate `SWW_B12_WEB_DIR` built with `API_INTERNAL_URL=http://127.0.0.1:18080`, the matching disposable cluster on loopback port 15432, and an installed Chromium browser or `SWW_B12_BROWSER_CHANNEL=msedge`. The Go fixture creates a fresh schema and ephemeral operator for each invocation.
+- Component tests (175), TypeScript, lint, isolated production build, and Go tests, vet and build passed. The ordinary Go regression ran without the existing integration database URL. The browser fixture itself used real PostgreSQL.
+
+### SWW-004F-B13 delivery hardening and release review
+
+#### Verified acceptance
+
+- [x] New staff invitations start in `AWAITING_DELIVERY`. Verification and redemption already require `PENDING`. After the mailer reports success, a conditional update makes the invitation redeemable. Delivery-failure revocation can transition only an awaiting invitation and writes its audit event in the same transaction. Owner provisioning and existing invitation states keep their previous behavior.
+- PostgreSQL tests simulated a lost SMTP confirmation and a failed revocation transaction. The affected token remained unverifiable and unredeemable. Additional cases verified redemption versus revocation, competing confirmation and revocation, and rollback of the losing transaction after a deliberately inverted membership writer triggered a PostgreSQL deadlock.
+- All three focused PostgreSQL staff suites and the full Go regression passed with PostgreSQL required on disposable `sww_structure_test` at `127.0.0.1:15432`. Go vet and build passed. An earlier focused run on the fresh database exposed interference from shared extensions installed in temporary schemas. Preinstalling `citext` and `pgcrypto` in `public` resolved it, and backend CI now performs the same setup before testing.
+- Release review excludes generated browser artifacts, TypeScript build metadata, backups and unrelated local files. The CI workflow YAML parsed locally. Hosted CI has not run for this working tree.
+
+#### Remaining risks
+
+- An SMTP server can accept a message even if its reply or the later QUIT reply is lost. The recipient may receive an unusable link, and the application cannot recall the email or guarantee inbox delivery. If database cleanup fails, the awaiting invitation remains unusable and may block reissue until expiration. A lost response after a committed confirmation can leave a usable invitation even though the API did not return success.
+- Membership writers must lock the tenant, then the user, then membership rows when they need those locks. PostgreSQL resolves a deadlock by aborting a transaction, which can require a retry. The exercised inversion does not establish safety for every future writer.
+- Apply migration `000008_staff_invitation_delivery` before enabling the new staff creation code and drain older staff invitation writers. Existing pending staff invitations are retained, so the new delivery gate applies to newly issued invitations. B12 used loopback HTTP and local capture. Deployed HTTPS and SMTP behavior remain outside that verification.
+
+### SWW-004F-B14 release audit and rollout checkpoint
+
+- Migration `000008_staff_invitation_delivery` adds one enum value without changing existing rows, the default, or invitation constraints. The migration runner serializes migrations with a transaction advisory lock and commits the enum addition with its ledger row before application code uses the new value. Existing `PENDING` invitations and School Owner provisioning retain their behavior.
+- Disable staff invitation creation at ingress before updating any application instance, including routes that can reach an older API directly. Wait for in-flight staff sends to finish and assess any pending staff invitations issued by the older code. Apply migration 000008 and verify its ledger entry. Replace or drain every older writer, verify the hardened endpoint in staging, then reopen creation. The enum addition alone cannot prevent an older writer from inserting `PENDING`.
+- If rollout fails, keep staff creation disabled and retain the additive enum migration. Existing readers continue to require `PENDING`, so awaiting rows remain ineligible even under older readers. If recovery is needed for a stranded link, leave it to expire or use an authorized, tenant-scoped and audited revocation followed by reissue through the hardened endpoint. Evidence of email delivery is required for activation. Do not convert stranded rows to `PENDING` or remove the enum value in an emergency down migration.
+- The backend CI job uses disposable PostgreSQL 16 at loopback port 5432 with database `sww_structure_test`, mandatory integration tests, masked per-run credentials, and shared extensions installed before parallel schemas. Port 15432 is the separately guarded local test fixture and is outside hosted CI. The hosted browser job uses its own disposable database for HTTPS auth and CSP. The B12 staff invitation browser journey remains local.
+- Staff invitation formatting normalizes editable school-name whitespace before putting the name in the mail subject. A regression test covers a school name containing CRLF.
+- The proposed feature scope contains 31 source, test, migration, documentation and CI paths. Hosted CI, deployed route isolation, invitation-path log redaction at the edge, and SMTP behavior still require release verification. B14 stops before staging or committing.
+
+### SWW-004F-B21 Staff Invitation review corrections
+
+- Staff issuance defaults to 10 invitations per actor per school and 25 total per school in a rolling 60-minute window. Set `STAFF_INVITATION_ACTOR_LIMIT` and `STAFF_INVITATION_TENANT_LIMIT` to integers from 1 through 1000, and `STAFF_INVITATION_WINDOW_MINUTES` from 1 through 1440. Use the same values on all API instances.
+- PostgreSQL serializes quota decisions on the tenant row. Issuance explicitly uses Read Committed so waiting requests see the previous committed charge even when the pool defaults to another isolation level. A committed creation audit event charges one issuance in both scopes using database time sampled after the authorization locks, regardless of mail outcome. Invalid, denied, duplicate and rolled-back requests do not charge quota. Duplicate conflicts retain HTTP 409. An exhausted scope returns HTTP 429 and a rounded-up retry interval covering both scopes. Keep issuance audit events throughout the configured window.
+- Issuance locks the active tenant, active issuer user, then active owner membership and holds those locks until commit. A suspension that wins the relevant lock and commits is observed and denies creation. If issuance wins and commits first, a later suspension does not retroactively cancel it. SMTP remains outside the transaction. Acceptance still locks invitation, tenant, user, membership. Issuance reads existing invitations without locking their rows. Confirmation updates only the invitation row.
+- Dashboard and settings responses expose `can_invite_staff` from all active memberships. The browser uses this capability, and the write endpoint independently enforces owner authority. No migration is needed. The B14 ingress block, writer drain and mixed-version rollout requirements still apply.
+
+### SWW-004F-B23 capability and quota boundary follow-up
+
+- Academic management is granted in school responses when an active membership is School Owner, School Admin or Principal, matching the Go academic session and term management policy. Staff invitation capability still requires an active School Owner. The existing display role remains available to clients.
+- The dashboard rechecks memberships when it regains focus or is restored from browser history. School settings refresh on entry, focus, browser history restoration, and Staff Invitation authorization denial. A discarded form cannot refresh a different school's settings.
+- Quota regressions cover exact database-time window boundaries, committed issuance after failed delivery, duplicate requests, and independent PostgreSQL pools. No migration is needed. The B14 ingress block and writer drain still apply.
+
+### SWW-004F-B25 denial handling and fixture isolation
+
+- A read-only owner precheck rejects unauthorized invitation requests before they can contend for the school's issuance row lock. The subsequent tenant, user, and owner-membership locks still determine authority. Authorized requests still take the tenant lock and can contend for database capacity. The quota bounds issuance and mail volume.
+- A denied invitation immediately disables submission. A forbidden response triggers a fresh, uncached capability and session check, scoped to the selected school. An affirmative result for the same school and a fresh CSRF token restore submission. A failed check leaves submission unavailable with a manual retry. An expired session refreshes to sign-in for the existing route. School switches abort pending checks.
+- The loopback browser fixture uses an independent ephemeral authorization key. The browser test discards raw transport diagnostics before reporting a fixture failure.
 
 ### Previously recorded acceptance results
 
@@ -82,3 +158,312 @@ Commands may be adjusted to actual generated directory and package scripts; do n
 ## First Antigravity task prompt
 
 > You are working in the School Without Walls repository. First read `AGENTS.md`, `.agents/rules/security.md`, `docs/PRD.md`, `docs/ARCHITECTURE.md` and this plan. Do not implement anything outside **SWW-001**. Create a Next.js + TypeScript frontend scaffold and Go modular-monolith backend scaffold with PostgreSQL configuration and migrations, `/health` and `/ready`, CI checks, environment examples, Windows PowerShell setup instructions, and basic unit/integration tests. Keep all secrets outside Git, use fictional seed data only, and provide exact test results and a proposed commit message. Do not advance to SWW-002 until reviewed.
+
+### Academic acceptance and deployment access checkpoint (21 November 2026)
+
+- SWW-004A, academic calendar scope. An independent read-only source review traced coverage of ordered terms, cross-tenant denial, audit rollback and concurrent activation. On the local Subject Management baseline 57d6953, all seven academics PostgreSQL suites passed with SWW_REQUIRE_POSTGRES_TESTS=1 against disposable loopback PostgreSQL 18. Academics Go vet passed. The scoped frontend run passed 124 tests across 17 files, and TypeScript passed. The disposable server was stopped after verification.
+- SWW-004B and SWW-004C have passing repository evidence for structure, subjects, offerings and teacher assignment constraints on this branch. SWW-004D still requires a real authenticated browser journey through the academic dashboard, including a write, persistence, role denial and cross-school denial. The current Playwright entry point covers authentication and CSP. Keep SWW-005 behind that acceptance gate.
+- SWW-DEPLOY-017. On this workstation Vercel API DNS returned IPv4 only. The HTTPS request timed out before TCP connected, and the CLI returned fetch failed. No shell or WinHTTP proxy was configured. Provider-side Git triggers are still unverified, so the deployment commit remains local. Supabase organization access was verified. Frankfurt is supported by the installed CLI, but organization billing and Free project eligibility still need owner confirmation.
+- SWW-DEPLOY-018 and SWW-DEPLOY-019 remain pending. The Docker CLI cannot reach the Linux daemon, and no alternate local builder was found. No hosted resource was provisioned. PR #9 and the deployment worktree were untouched.
+
+### SWW-004D local browser acceptance (21 November 2026)
+
+- The independent reviewer checked the browser assertions against the Go authorization path. The owner creates a draft through the Next.js form, receives HTTP 201 from Go, and sees the stored draft after reload. A separately authenticated teacher can read the draft but cannot create a session, and the UI hides the write action. Go rejects a missing CSRF header with 403, a teacher write with a distinct 403, and cross-school access with 404. The browser also renders the cross-school denial. Tests use fictional roles and the existing HTTPS browser proxy.
+- The Windows runner creates a new disposable PostgreSQL cluster and the exact guarded database `sww_e2e_test`, migrates it, and seeds two fictional schools. It runs the Edge acceptance spec and stops the cluster. No change to `sww_dev`, production schema, or application code. The Go test server retains its existing all-interface bind on port 8080. Run the fixture on a trusted development machine.
+- Reproduce after installing the frontend dependencies with `powershell.exe -NoProfile -File .\scripts\test-academics-browser.ps1`. Git for Windows OpenSSL, local PostgreSQL and Microsoft Edge are required. The runner accepts `-PostgresBin` and `-OpenSSL` for alternative installed paths.
+- Cloud provisioning and paid integrations are paused by owner direction. Keep deployment commit 403ee85 and PR #9 isolated. SWW-005 starts from FR-PEO-001, FR-PEO-002, FR-ACA-003 and FR-ID-004. Keep people records separate from permission grants, use tenant-aware relationships, require one active section per student/term, and test immediate guardian unlink and cross-school denial. Coordinate migration numbering with PR #9, which already owns 000008.
+
+### SWW-005 — student, guardian, and enrollment schema slice
+
+- Local branch `feature/SWW-005-people-enrollment` starts at accepted academics commit `3681ed7`. FR-PEO-001 and FR-ACA-003 storage is implemented in migration `000009_people_enrollment`. The existing Staff Invitation branch retains ownership of `000008`.
+- Students and guardians can be recorded before receiving login access. Any linked identity must have the matching tenant role. Composite foreign keys constrain guardian relationships, academic year, class and arm. A partial unique index permits one active enrollment per student and term, while ended rows remain available for history.
+- Mandatory PostgreSQL migration tests passed on a disposable loopback database, including duplicate admission numbers, wrong-role identity links, cross-school guardian links, incompatible enrollment scope, active enrollment uniqueness and retained history. Full Go regression, vet and build passed. No migration ran against `sww_dev`.
+- SWW-005 remains open. The next application slice must enforce role and relationship checks in Go, lock and audit guardian link changes, implement atomic enrollment transfers, and provide the frontend journeys. No student or guardian data route is enabled by this migration. Verify the combined migration sequence with the Staff Invitation line before integration.
+
+### SWW-005 — student summary and guardian revocation
+
+- `GET /api/v1/tenants/{slug}/students/{studentID}` returns only the student ID, display name, and education stage. It requires a session and active tenant and user state. School managers can read the tenant summary. A student can read their own active record, and a parent can read an active record only while their active guardian relationship exists. Other requests receive a generic not-found response.
+- `DELETE /api/v1/tenants/{slug}/students/{studentID}/guardians/{guardianID}` is a CSRF-protected soft unlink for active owners, school admins, and principals. It locks tenant, actor, and authority membership in that order. Unlink and its redacted audit event commit together. Each read rechecks the link, so a read started after commit is denied for a parent with no remaining authorized relationship.
+- Student and guardian create/list/update, staff records, enrollment transfers, and frontend workflows remain outstanding. No migration was run against `sww_dev`.
+
+### SWW-005 — atomic enrollment transfer
+
+- `POST /api/v1/tenants/{slug}/students/{studentID}/enrollments/{enrollmentID}/transfers` accepts `class_id` and optional `class_arm_id`. The path identifies the expected current placement. A stale or unchanged placement returns 409. Missing or inaccessible records return 404.
+- Go checks the active school and manager membership, locks the active student and academic session, and verifies the destination belongs to the same session. The existing placement ends at the same instant as the replacement begins in the same term. The audit event and both changes commit together. The original row remains available for enrollment history.
+- The transfer endpoint does not create initial enrollments. Student and guardian management, staff records, enrollment creation and history views, and frontend journeys remain outstanding.
+
+### SWW-005 — initial enrollment and history
+
+- `POST /api/v1/tenants/{slug}/students/{studentID}/enrollments` takes `term_id`, `class_id`, and an optional `class_arm_id`. An active school manager with a valid session and CSRF token may place an active student in an active class within the term's active session. Creation and its redacted audit event commit together. Duplicate active placement returns 409.
+- `GET /api/v1/tenants/{slug}/students/{studentID}/enrollments` is manager-only and sends `Cache-Control: no-store`. It returns active and ended placements with timestamps, up to 50 per page. Supply the returned `next_cursor` as `before` to retrieve older placements for that same student.
+- Student and guardian management, staff records, enrollment frontend workflows, and browser acceptance remain outstanding.
+
+### SWW-005 — student registration and profile management
+
+- Active school owners, school administrators, and principals use `GET /api/v1/tenants/{slug}/students` for a tenant-scoped list of up to 50 records and `next_cursor` as the next request's `after` parameter. Registration uses `POST` on the same collection and replacement of editable fields uses `PUT /students/{studentID}` within the tenant path. Writes require CSRF and audit the record ID without profile values. A duplicate admission number returns 409.
+- Registration captures admission number, display name, and education stage. This slice does not collect optional birth dates or grant account access. The student and guardian summary remains relationship-scoped and excludes admission numbers. Guardian and staff management and frontend acceptance remain outstanding.
+
+### SWW-005 — guardian profiles and relationships
+
+- Active school owners, school administrators, and principals can create and list guardian profiles via `POST` and `GET /api/v1/tenants/{slug}/guardians` and edit them via `PUT /guardians/{guardianID}` under the tenant path. Lists are uncached and paginated. Optional `student_id` restricts the list to active links for that student. Contact details are manager-only.
+- `PUT /api/v1/tenants/{slug}/students/{studentID}/guardians/{guardianID}` saves the relationship label and activates the link. The existing `DELETE` soft-unlinks. Writes require CSRF and audit changes in the same transaction. Saving an identical active link does not write another audit event. Profile and link writes do not create identities or memberships.
+- Staff records, student and guardian account onboarding, and frontend acceptance remain outstanding.
+
+### SWW-005 — staff profiles
+
+- `GET /api/v1/tenants/{slug}/staff` lists staff profiles for active school owners, school administrators, and principals. It returns up to 50 records with an optional `next_cursor` for the `after` query parameter. The response is uncached.
+- `POST` on that collection records `membership_id`, `display_name`, and `staff_code` for an existing active staff membership in the same school. `PUT /staff/{staffID}` under the tenant path changes display name and staff code only. Writes require CSRF and commit with redacted audit events.
+- Migration `000009_people_enrollment` adds staff profiles with tenant-aware membership references and one profile per school and user. Staff code is case-insensitively unique per school. Staff profile changes do not grant, update, or reactivate membership. Invitations remain a separate workflow.
+- Student and guardian account onboarding, staff membership selection in the UI, people management screens, and browser acceptance remain outstanding.
+
+### SWW-005 — staff membership selection and dashboard
+
+- `GET /api/v1/tenants/{slug}/staff/candidates` lists active staff memberships without a profile, one candidate per user. It is manager-only, tenant-scoped, uncached and paginated using `after`. The response includes the existing account email so managers can distinguish staff with the same display name, but exposes no credentials or separate contact details.
+- `/schools/{slug}/staff` loads staff profiles and candidates through authenticated Go endpoints before showing the form. It creates and edits staff profiles with CSRF protection and no membership changes. The existing disposable Edge runner now exercises the staff workflow as well as academics.
+- Student and guardian onboarding and the remaining people and enrollment dashboard journeys are still open.
+
+The local staff and academics browser runner uses PostgreSQL 15435, Next.js 13003, HTTPS proxy 13443, and Go API 18083. The hosted authentication/CSP workflow retains its existing default ports.
+
+The staff and academic Edge journeys passed against production Next.js, the real Go API and disposable PostgreSQL. The owner selected a staff account, created and edited its profile, and saw the saved staff code after reload. The teacher and a school outside the owner's membership received the denial UI. The candidate disappeared after profile creation. The full Go regression with mandatory PostgreSQL, Go vet and build, 165 frontend tests, TypeScript, lint and production build passed.
+
+### SWW-005 — student dashboard
+
+- My Schools links to `/schools/{slug}/students`. The page loads the current session and the manager-only student list from Go before rendering any records or edit controls. The list uses the existing API cursor for navigation.
+- Registration and editing use same-origin requests and the current session CSRF token. The form defaults to Primary, with the other approved stages available. Admission number conflicts and access failures produce safe messages. Student registration does not create an account or collect a birth date.
+- Guardian and enrollment dashboard controls and student and guardian account onboarding remain pending.
+
+The three Edge journeys passed against production Next.js, the Go API, and fresh disposable PostgreSQL. The owner registered and edited a student through My Schools and verified the saved education stage after reload. Teacher and cross-school views disclosed neither student data nor edit controls. All 168 frontend tests, TypeScript, lint, production build and diff checks passed.
+
+### SWW-005 — guardian dashboard
+
+- The Students page links to the manager-only guardian directory and to each student's relationship view. Managers can register and edit guardians, save a relationship, or confirm unlinking. Directory and relationship lists use independent cursors. The page loads the relevant Go responses before rendering profiles or controls.
+- Confirmed unlinking removes the active relationship while retaining the guardian profile. Link changes use same-origin CSRF-protected calls. Guardian account invitation and identity binding remain separate work, along with the enrollment dashboard.
+
+All four Edge journeys passed against production Next.js, the real Go API and disposable PostgreSQL. The guardian journey verified registration, editing, a link after reload, unlinking without deleting the profile, and cross-school denial without exposure of contact details. The 168 frontend tests, TypeScript, lint and production build passed.
+
+### SWW-005 — enrollment dashboard
+
+- Each student row links to a manager-only enrollment page. It lists active and ended placements with academic names and timestamps. The first enrollment form uses terms and classes from the active session. Class arms are loaded for the selected class. Transfers operate on the displayed active placement and retain the same term. History is cursor-paginated.
+- The page uses the existing Go authorization, CSRF, transaction, and audit controls. Initial placements and transfers refresh history after success. A stale transfer or duplicate enrollment shows a conflict and refreshes history. Student and guardian account onboarding remains open.
+
+All five Edge journeys passed against production Next.js, Go, and disposable PostgreSQL. The enrollment journey selected an active term, class and arm, transferred to a second class, and verified one ended and one active placement after reload. A cross-school route showed no placement details. Mandatory PostgreSQL Go tests, Go vet and build, 168 frontend tests, TypeScript, lint, production build, and diff whitespace checks passed.
+
+### SWW-005 local invitation integration checkpoint
+
+The local onboarding integration branch combines the verified people and enrollment checkpoint with both Staff Invitation commits from PR #9. The source commits remain traceable in the cherry-pick messages.
+
+The combined branch passed the migration and full Go regression with PostgreSQL required, Go vet and build, all 189 frontend tests, TypeScript, lint, and the Next.js production build. Five academics and people journeys passed in Edge. A separate Edge run passed both staff roles in the existing Staff Invitation journey using the real Go API, disposable loopback PostgreSQL, and local mail capture.
+
+Student and guardian account invitation and profile binding remain open under FR-ID-004. This checkpoint verifies the existing staff flow on the combined branch.
+
+### SWW-005 profile invitation redemption
+
+Migration 000010 requires each STUDENT or PARENT invitation to reference exactly one profile of the corresponding kind in the same tenant. Redemption locks the profile after the tenant, user, and membership checks, then rechecks expiry with the database clock. Profile binding, membership grant, token consumption, session creation, and acceptance audit share one transaction. A guardian invitation must still match the stored contact address, and a student must still be active and unbound.
+
+The focused PostgreSQL test exercises delivery gating, cross-tenant target rejection, changed guardian contact rollback, exact account binding, and replay for both roles. Its fixtures insert invitations directly. The manager issuance API, email handoff, and browser workflow are still open. Before enabling issuance, migrate the database and upgrade or drain all older API instances, because their redemption code does not bind the target profile. Check for any legacy unbound STUDENT or PARENT invitation rows before applying the migration. The constraint rejects those rows instead of guessing a target.
+
+### SWW-005 profile invitation issuance API
+
+School Owners, School Administrators, and Principals with active membership may issue account invitations in an active school through the authenticated, CSRF-protected student and guardian profile routes. The student route takes an email address. The guardian route uses the profile's stored contact address. The routes determine the role on the server and return only the invitation identifier and expiry after successful mail handoff and database confirmation.
+
+Staff and profile issuance share the configured rolling actor and school quotas under the same tenant lock. Duplicate invitations do not consume quota. Delivery or confirmation failure retains the issuance charge, and uncertain handoff can leave an unusable invitation awaiting delivery. A pending invitation for the same profile blocks a replacement until the first expires. Keep the documented rollout and ingress restrictions, and complete migration 000010 and the API upgrade before exposing either route.
+
+The PostgreSQL HTTP regression covers authorization, CSRF, cross-school profile denial, guardian address override rejection, invalid student email, conflict, quota and retry guidance, local mail capture, acceptance of both captured links, and replay rejection. Browser manager controls and browser-level onboarding remain open.
+
+### SWW-005 local browser acceptance
+
+Student and guardian account invitations are available from the respective profile lists. Edge verified both account journeys using the real Go API, disposable loopback PostgreSQL, and local mail capture. The test confirmed accepted account roles after fresh sign-in, access to the intended student record, denial of the manager directory, replay rejection, and immediate guardian access revocation after unlinking. The existing staff invitation browser journey also passed in the same run. The 189 frontend tests, TypeScript, lint, and the production build passed.
+
+SWW-005 local acceptance is complete. The migration and API rollout order above still applies before hosted exposure.
+
+### SWW-006 curriculum registry schema
+
+Migration 000011 adds a global framework edition registry and objectives indexed by stable edition-specific codes. Frameworks record publisher, jurisdiction, effective dates, source, and license metadata. Nigerian primary frameworks, developmental frameworks, and optional enrichment are distinguished by kind. Objective rows store the stage, grade band, subject, and strand for browsing and indexing.
+
+Published metadata and objectives are retained, including after an edition is withdrawn. Editors create a new edition for revisions. The PostgreSQL regression verified coexisting editions, edition-scoped objective codes, Nigerian jurisdiction validation, and retention of a withdrawn edition's original objective. The fixture uses fictional text and does not confer curriculum rights or approval.
+
+SWW-006 remains open. The published registry API, alignment review, tenant edition selection, and rights-reviewed content acceptance are pending.
+
+### SWW-006 published curriculum catalog API
+
+`GET /api/v1/curriculum/frameworks` lists published edition metadata and identifies Nigerian primary, developmental, and enrichment frameworks. `GET /api/v1/curriculum/objectives` requires a `framework_version_id` and accepts an optional `stage`. Both return up to 50 items in ID order with an optional `next` cursor passed back as `after`. Unknown, draft, and withdrawn editions return an empty objective list. The catalog is global and contains no tenant selections or learner information.
+
+Reads require an authenticated user with an active membership in an active school. The PostgreSQL-backed router test verified anonymous denial, platform-operator denial without school membership, school and membership suspension, published-only results, provenance metadata, stage filtering, and cursor pagination. Registry browsing in the dashboard, alignment review, tenant session edition selection, and rights-reviewed content remain open.
+
+### SWW-006 dashboard curriculum browser
+
+My Schools links active members to the published curriculum catalog. The page displays edition provenance and source links, distinguishes Nigerian curriculum from optional enrichment, and supports education-stage filtering and cursor navigation. Session and membership checks remain in Go. The browser fixture uses fictional curriculum only.
+
+All 189 frontend tests, TypeScript, lint, and the Next.js build passed. All six Edge journeys passed against the real Go API and disposable PostgreSQL. The curriculum journey verified anonymous redirect, visible provenance, separate enrichment labeling, draft exclusion, filtering, an empty result, and no horizontal overflow at 360 pixels.
+
+Alignment review, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 alignment storage and review gate
+
+Migration 000012 implements the FR-CUR-004 storage and verification boundary. Nigerian objectives can link to enrichment objectives through one of the four declared relations. Mappings start as drafts. Review requires a reviewer identity and two published editions, stamps the review time in PostgreSQL, and preserves the approved mapping as history. The verified view omits drafts and hides a mapping when either edition is withdrawn while retaining its review record.
+
+The PostgreSQL test covered invalid direction and relation, duplicate links, review before publication, missing reviewer, edits during review, visibility after review, immutability, and withdrawal. The database records reviewer identity. Reviewer authorization, audited review actions, verified catalog display, and tenant edition selection remain to be implemented in the application.
+
+### SWW-006 alignment review API
+
+Active platform administrators create a draft with POST /api/v1/curriculum/alignments and explicitly approve it with POST /api/v1/curriculum/alignments/{alignmentID}/review. Global catalog changes require the existing global grant. School roles do not authorize global publication. Both writes require an authenticated session and CSRF validation. The approval uses the authenticated actor, and each successful write records a global audit event in the same transaction.
+
+Active school members can read verified links through GET /api/v1/curriculum/alignments with primary_objective_id and optional after cursor. The result includes the review date and omits the internal reviewer identifier. The PostgreSQL HTTP regression verified draft invisibility, forbidden school-role writes, CSRF, reviewer-field rejection, duplicate and premature approvals, audit counts, grant removal, and suppression after withdrawal.
+
+The review UI and verified alignment display, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 verified alignment display
+
+Members can open verified enrichment for a published Nigerian objective. The browser shows the related objective, relationship, review date, edition, publisher, and source and license information. The read endpoint supplies these fields from the verified view and published registry. Draft and withdrawn mappings remain excluded, and reviewer identity stays internal.
+
+The full Go suite with PostgreSQL required, Go vet and build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against the real API and disposable PostgreSQL. The curriculum journey confirmed the optional enrichment label, provenance link, draft exclusion, and return to the selected stage.
+
+The platform review interface, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 platform alignment review queue
+
+Platform administrators can inspect paginated drafts from the platform dashboard and explicitly approve a mapping after comparing the objectives, relation and edition status. The API checks the existing global grant before returning drafts and independently enforces authorization, CSRF, and the published-edition requirement on approval. Draft creation remains available through the existing API.
+
+PostgreSQL HTTP coverage verified operator-only queue access, removal after approval, and denial after grant revocation. The full Go suite with PostgreSQL required, vet, build, 189 frontend tests, TypeScript, lint, and the production build passed. The six Edge journeys passed against the real API and disposable PostgreSQL. A school member was denied draft access, a separate operator approved the draft through the confirmation UI, and the member then saw the verified mapping.
+
+School-session edition selection and rights-reviewed content remain open.
+
+### SWW-006 school-session curriculum selection storage
+
+Migration 000013 implements the FR-CUR-005 storage foundation. Each school, session, stage, and curriculum role has an append-only selection history. Replacing an edition creates a new revision. The original selection ID and framework version remain available for future lesson or report references. The latest choice remains explicit after its edition is withdrawn, and consumers must check the edition status before assigning new content.
+
+Selections require a same-school session and a published edition with an objective in the selected stage. The role distinguishes Nigerian primary curriculum and optional enrichment. A published developmental framework may serve as primary for Early Years. Archived sessions retain their selections and reject new revisions.
+
+The disposable PostgreSQL test covered cross-school rejection, edition eligibility, one sequential history per slot, optional enrichment and developmental selections, immutable history, withdrawal, and archived-session rejection. The school manager API, dashboard selection and downstream historical lesson/report integration remain open.
+
+### SWW-006 school-session selection API
+
+Active School Owners, School Administrators, and Principals may use GET and POST /api/v1/tenants/{slug}/academic-sessions/{sessionID}/curriculum. GET returns the current selections and each edition status, including withdrawn editions. The write requires authentication and CSRF, accepts stage, curriculum_role, framework_version_id, and expected_revision, and returns the newly appended revision. Use expected_revision zero for a first selection. A stale revision or archived session returns HTTP 409.
+
+Writes recheck authorization under tenant, user, membership and session locks. The session lock serializes revision decisions, and the audit event commits with the appended selection. The focused PostgreSQL HTTP regression verified concurrent conflict handling, one audit for the successful write, read-only archived sessions, missing CSRF, foreign school and teacher denial, and permission loss when the active Principal role was suspended. Dashboard controls and downstream historical lesson/report references remain open.
+
+### SWW-006 school-session selection dashboard
+
+Academic managers can open Curriculum editions for the selected session, filter published choices by stage and curriculum role, and save through the CSRF-protected revision API. The page identifies withdrawn selections, displays archived sessions as read-only, and refreshes after a stale-write conflict. The framework catalog accepts optional stage and curriculum_role filters. The write remains the authoritative eligibility check.
+
+The required PostgreSQL Go suite, vet, build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against disposable PostgreSQL and the real API. The extended academics journey saved separate Nigerian primary and optional British enrichment selections, checked persistence, and verified teacher and foreign-school denial.
+
+Rights-reviewed content and downstream historical lesson/report integration remain open.
+
+### SWW-006 curriculum import and publication API
+
+Active platform administrators can POST /api/v1/curriculum/frameworks/import to import a bounded JSON framework edition with up to 50 structured objectives. The request requires an HTTPS provenance URL, a license note, and explicit rights confirmation. The import stores a draft with its objectives atomically and records a global audit event. The endpoint accepts structured text and does not retrieve files or external URLs.
+
+GET /api/v1/curriculum/frameworks/{frameworkID}/draft gives authorized operators the stored draft objectives and provenance for review. POST /api/v1/curriculum/frameworks/{frameworkID}/publish requires separate rights and content confirmations. Both writes enforce CSRF and recheck the active operator grant. The authenticated actor and publication are recorded atomically. School members can only see objectives after publication.
+
+The PostgreSQL HTTP test verified denial of school-member writes and draft previews, missing CSRF, missing rights confirmation, non-HTTPS and whitespace-containing URLs, draft invisibility, operator preview, explicit publication, duplicate rejection, and audit records. The regression used original fictional fixtures. Actual curriculum rights and educational review still require qualified reviewers, and sample lessons and assignments depend on the corresponding learning workflows.
+
+### SWW-007 lesson lifecycle storage
+
+Migration 000014 adds tenant-scoped text lesson drafts tied to an offering, author membership, curriculum selection revision, and a primary objective. New drafts use the current primary edition for the offering's session and stage. Existing drafts retain the original reference when a school selects another edition. Publication requires an active session and a still-published pinned edition. Published text is immutable and archival retains its history.
+
+The disposable PostgreSQL regression verified wrong-school and wrong-edition denial, draft-session publication denial, historical edition pinning, withdrawal before publication, and archival. Teacher assignment and learner enrollment authorization must be applied in the Go API. The teacher and student pages, optional lesson review, enrichment links, and media remain open.
+
+### SWW-007 student lesson read API
+
+The lesson feed and direct lesson reads use the same tenant-scoped authorization query. It checks active learner identity, STUDENT membership, linked student profile, enrollment, school session, local term dates, class or arm, offering, and publication time. The feed returns bounded summaries and the detail route returns plain lesson text only for eligible students. Ending an enrollment blocks subsequent reads.
+
+The PostgreSQL HTTP regression covered an anonymous request, direct access before and after enrollment, published summaries, draft exclusion, cross-school denial, and access after enrollment ends. The teacher API and the student browser workflow remain open.
+
+### SWW-007 teacher lesson write API
+
+Teachers with an active offering assignment can create and edit their own plain-text lesson drafts, publish eligible drafts, and archive published lessons. Go rechecks the active actor, tenant, membership, assignment, and offering under row locks. The current primary curriculum selection is resolved on the server at creation. Draft edits, publication, and archival preserve the pinned curriculum reference. Each successful mutation records a tenant audit event in the same transaction.
+
+PostgreSQL HTTP coverage exercises the assignment gate, missing CSRF, cross-school denial, stale curriculum objective, draft editing, assignment revocation, one-time publication, published-text immutability, and archival. Teacher browsing and the classroom dashboards remain open, as do optional review, enrichment links, and media.
+
+### SWW-007 teacher lesson read API
+
+The teaching API lists assigned offerings, eligible objectives from the current primary edition, and the teacher's own lesson summaries. The direct lesson route returns full text only when the requesting teacher is the author and still holds the active offering assignment. Reads are uncached and lists use a bounded cursor.
+
+The focused PostgreSQL HTTP regression verified assignment-scoped offering discovery, current-edition objective filtering, draft summary versus detail, cross-school denial, and loss of detail access after assignment revocation. The next application slice is the teacher and learner browser workflow.
+
+### SWW-007 text lesson browser workflow
+
+My Schools links teachers and students to their teaching and lesson pages using independent server-derived capabilities. An assigned teacher can choose an eligible primary objective, create and edit a draft, and explicitly confirm publication or archival. Enrolled students can read published text with the existing server permission checks.
+
+The seven Edge journeys passed with the real API and disposable PostgreSQL. The lesson journey verified draft invisibility, teacher publication, enrolled-student reading on a 360-pixel screen, student denial on the teacher route, draft and cross-school direct-link denial, and literal display of HTML-like lesson text. The required PostgreSQL Go suite, vet and build, 189 frontend tests, TypeScript, lint and production build passed. Optional review, enrichment selection and private media remain open.
+
+### SWW-007 revision-bound lesson approval API
+
+Migration 000015 supports optional lesson review through the tenant's lesson_review_required feature flag. Assigned teachers submit their current draft revision. Active school managers may inspect submitted text and approve the exact revision, with self-approval excluded. PostgreSQL blocks publication without current approval when the flag is enabled. Editing title or content advances the revision and invalidates earlier approval. Submission and approval are audited.
+
+The PostgreSQL HTTP regression covered ordinary publication with the flag off, gated publication, current review queue visibility, self-approval and cross-school denial, CSRF, and approval invalidation after an edit. The controlled school setting and browser review workflow remain open, together with lesson enrichment and private media.
+
+### SWW-007 lesson review browser workflow
+
+School Owners and School Administrators can change the audited publication policy. Principals can review submitted content without changing the policy. Authors can submit the saved revision, see its review status, and publish after approval. The Edge journey exercised school policy activation, separate reviewer approval, publication, and the enrolled student's view. The final run passed all seven Edge journeys. The PostgreSQL-required Go suite, vet, build, 189 frontend tests, TypeScript, lint, and production build passed. Enrichment and private media remain open.
+
+### SWW-007 lesson enrichment write gate
+
+Migration 000016 and the teacher lesson write API accept up to ten distinct verified enrichment mappings. Each must reference the pinned primary objective, match its stage, and use the school's currently selected published enrichment edition. The database rechecks eligibility at publication. Changing the mapping list advances the lesson's review revision, and a published lesson retains its original mappings.
+
+The PostgreSQL regression covers unreviewed and duplicate mappings, a mapping for the wrong primary objective, a revised draft, immutable published mappings, and withdrawal before publication. Teacher option discovery and selection controls and the student display remain open, along with private media.
+
+### SWW-007 enrichment browser workflow
+
+Teachers can select verified optional enrichment for the primary objective, and existing selections that lose eligibility are flagged in the draft editor. Reviewers see the submitted mappings and learners see the pinned mappings on published lessons, with withdrawn editions identified. The Edge journey selected enrichment in the draft, verified it in the reviewer queue, and confirmed it on the enrolled learner page after publication. All seven browser journeys, the PostgreSQL-required Go suite, vet, build, 189 frontend tests, TypeScript, lint and the production build passed. Private media remains open.
+
+### SWW-007 private media quarantine and attachment storage
+
+Migration 000017 records private lesson objects against the same tenant and lesson. Metadata limits declared content type to PDF, PNG or JPEG and size to 8 MiB. Objects start in quarantine. Only ready media can be attached or published, attachment changes advance the lesson approval revision, and published lessons retain the attachment reference. A ready object can be marked rejected to support later safety revocation.
+
+The disposable PostgreSQL regression verified quarantine, invalid type and size, wrong-school and wrong-lesson rejection, revision invalidation, immutable publication and revocation. This migration stores metadata and enforces database state. The private S3-compatible storage adapter, actual scanning, signed access, runtime authorization, and browser controls still need implementation and verification. Docker Desktop's engine was unavailable during this local check.
+
+### SWW-007 private object and scanner adapters
+
+The private S3-compatible adapter creates two-minute upload grants scoped to quarantine and bound to the declared size and SHA-256 checksum. Promotion verifies the bytes and declared media type, requires a clean scanner response, and writes exactly the scanned bytes to a separate ready prefix using a conditional write. A retry checks an existing ready object against the expected checksum. Download signing targets only the ready prefix and requests attachment disposition and no-store caching.
+
+The ClamAV adapter uses bounded INSTREAM framing and rejects malformed replies, scan errors, and timeouts. Loopback protocol tests exercised signing, checksum/size binding, failed scan, clean promotion, and a retry. Real object-store bucket policy, CORS, actual ClamAV operation, authenticated media routes and browser controls remain open. The adapters are not registered in the API yet.
+
+### SWW-007 private lesson media API
+
+Media routes are disabled by default. Set LESSON_MEDIA_ENABLED=true with LESSON_MEDIA_S3_ENDPOINT, LESSON_MEDIA_S3_BUCKET, LESSON_MEDIA_S3_REGION, LESSON_MEDIA_S3_ACCESS_KEY, LESSON_MEDIA_S3_SECRET_KEY, LESSON_MEDIA_SCANNER_NETWORK and LESSON_MEDIA_SCANNER_ADDRESS only for explicitly configured private services. The scanner uses a local Unix socket or literal private or loopback TCP address. The object endpoint requires HTTPS except for literal loopback.
+
+Assigned authors can issue upload intents on their own draft, then complete the upload. Completion verifies and scans the bytes before attaching and rechecks write scope after scanning. An individual lesson is capped at 20 intents, pending intents can be completed for 15 minutes, and each API process permits four concurrent scans. Enrolled students can request a two-minute download only for a published lesson's attached ready object. A rejection prevents new grants. Existing grants expire on their original schedule.
+
+Disposable PostgreSQL and loopback storage/scanner protocol tests verified CSRF, teacher and student permissions, private key separation, promotion, cross-school denial and rejection. Browser upload/download and reviewer preview, object cleanup, and provider/scanner runtime checks remain open. Enabling a real bucket requires private access policy, scoped credentials and explicit browser CORS configuration.
+
+### SWW-007 student lesson attachment download control
+
+Published lesson detail reports attachment availability only when media is enabled and the attachment is ready. The student requests a fresh two-minute grant from the authorized API at click time. The download opens without a referrer, and failures show generic feedback. Disposable PostgreSQL and loopback protocol verification covered enrollment and cross-school denial, ready attachment visibility, and rejection. Frontend component tests cover the download action and denial feedback. A browser download against a real private bucket, teacher upload, reviewer preview, and object cleanup remain open.
+
+
+### SWW-007 teacher lesson attachment upload control
+
+Authors can upload a PDF, PNG or JPEG up to 8 MiB to a saved draft. The API authorizes and issues the quarantine grant, the browser transfers the file without app credentials, and the API scans and attaches it before the form reports success. Changing an attachment invalidates approval of the previous draft revision. The teaching dashboard uses a full document navigation so its upload-origin policy is applied.
+
+Set the web server's LESSON_MEDIA_BROWSER_ORIGIN to the exact storage origin used by the API's LESSON_MEDIA_S3_ENDPOINT. Use HTTPS outside loopback development. Leave it unset to disable the upload controls. Bucket CORS must allow PUT from the exact application origin with Content-Type and, when signed, X-Amz-Checksum-Sha256. Keep all object prefixes private. PostgreSQL verified the capability on an authorized draft and its absence after publication. Component tests verified the request sequence, credential isolation, origin restriction and scanner rejection feedback. End-to-end upload and download with a real private bucket and ClamAV, reviewer attachment access and object cleanup remain open.
+
+
+### SWW-007 reviewer lesson attachment access
+
+Authorized school reviewers can download a scanned attachment for the exact pending revision shown in the queue. The API rechecks tenant, active reviewer role, separation from the author, pending revision and ready storage state before issuing a two-minute grant. The queue contains no signed URL. Approval confirmation stays tied to the displayed revision. Previously issued grants retain their original expiry.
+
+Disposable PostgreSQL and loopback verification covered the authorized grant, missing session, author and student denial, cross-school denial, reviewer suspension, stale revision and approval. Browser verification with private storage and ClamAV, and cleanup of unused objects, remain open.
+
+
+### SWW-007 quarantine retention policy
+
+Configure storage lifecycle expiration for the exact quarantine/ prefix only, with a minimum age of one day. Upload grants last two minutes and completion expires after 15 minutes. The ready/ prefix receives the separately scanned object. Specify quarantine noncurrent-version expiration as well if bucket versioning is enabled. Validate the lifecycle scope in a disposable bucket before enabling it on any deployed bucket.
+
+Use a separate hostname for private storage so download navigation cannot carry the host-only app session cookies. Review the real provider's CORS, signed request behavior, and lifecycle execution with fictional data before rollout. This policy deliberately retains ready objects and their PostgreSQL metadata. Reclamation of replaced or rejected ready objects still needs an explicit retention policy and a state-aware cleanup procedure. No hosted lifecycle rule was applied.
+
+
+### SWW-007 controlled browser media acceptance
+
+The final seven Edge journeys passed using the production Next.js build, real Go API and disposable PostgreSQL. The lesson journey uploaded a fictional PDF to separate loopback storage, passed the scanner protocol fixture, downloaded and checked the exact bytes as the reviewer, approved and published, and downloaded the same PDF as an enrolled student. The storage fixture checked the upload's declared size and checksum, absence of app credentials, and the download's attachment disposition, expiry and absence of cookies and referrer. Six other school journeys passed. Actual object-provider signature enforcement, lifecycle application and ClamAV runtime remain deployment acceptance gates.
+
+
+### SWW-008 personal lesson progress
+
+Migration 000019 adds one progress record per student and lesson, with tenant-scoped foreign keys. Apply it before running the updated API. Lesson responses report Not started, In progress or Completed. The authenticated CSRF-protected update derives the student from the current active membership and enrollment in the same database statement as the write. PostgreSQL preserves the original start and completion timestamps across repeated requests. Completion cannot be undone through this endpoint.
+
+The PostgreSQL-required lesson lifecycle regression covered no session, missing CSRF, foreign school, draft and ended enrollment denial, rejection of caller-supplied student identity, zero writes on denial, and persisted progress in the student feed. The full PostgreSQL-required Go regression, vet and build passed. Assignment publication, submission, scoring and feedback remain open.
+
+
+All seven controlled Edge journeys passed in the final run. The learner started a lesson, reloaded, completed it, and reloaded again to confirm the saved state. The run also verified teacher upload and both reviewer and learner downloads after removing the dependency on a new tab. The 197 frontend tests, focused download test, security headers, and Next.js lint, type and build checks passed.

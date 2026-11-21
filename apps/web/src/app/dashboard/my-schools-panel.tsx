@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { listMySchools, type Tenant } from "@/lib/tenant-client";
+import { canInviteStaff, listMySchools, type Tenant } from "@/lib/tenant-client";
 
 type LoadState = "loading" | "ready" | "error";
 
@@ -29,6 +29,22 @@ export default function MySchoolsPanel() {
       cancelled = true;
     };
   }, [retryKey]);
+
+  useEffect(() => {
+    const refresh = () => {
+      setLoadState("loading");
+      setRetryKey((value) => value + 1);
+    };
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", onPageShow);
+    };
+  }, []);
 
   return (
     <section
@@ -77,6 +93,12 @@ export default function MySchoolsPanel() {
       )}
 
       {loadState === "ready" && schools.length > 0 && (
+        <Link href="/curriculum" className="mt-3 inline-block min-h-11 py-2 font-medium text-green-800 underline">
+          Browse curriculum
+        </Link>
+      )}
+
+      {loadState === "ready" && schools.length > 0 && (
         <div className="mt-5 grid gap-4 md:grid-cols-2">
           {schools.map((school) => {
             const base = `/schools/${encodeURIComponent(school.slug)}`;
@@ -101,6 +123,12 @@ export default function MySchoolsPanel() {
                   >
                     Academic Management
                   </Link>
+                  <Link href={`${base}/students`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    Students
+                  </Link>
+                  <Link href={`${base}/staff`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    Staff profiles
+                  </Link>
 
                   <Link
                     href={`${base}/settings`}
@@ -108,6 +136,29 @@ export default function MySchoolsPanel() {
                   >
                     School Settings
                   </Link>
+                  {school.can_manage_academics === true && (
+                    <Link href={`${base}/lesson-reviews`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                      Lesson reviews
+                    </Link>
+                  )}
+                  {school.can_teach_lessons === true && (
+                    <a href={`${base}/teaching`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                      Teaching lessons
+                    </a>
+                  )}
+                  {school.can_read_lessons === true && (
+                    <Link href={`${base}/learning`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                      Lessons
+                    </Link>
+                  )}
+                  {canInviteStaff(school) && (
+                    <Link
+                      href={`${base}/settings#invite-staff`}
+                      className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:bg-gray-50"
+                    >
+                      Invite Staff
+                    </Link>
+                  )}
                 </div>
               </article>
             );

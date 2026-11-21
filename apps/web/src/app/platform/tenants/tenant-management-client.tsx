@@ -86,6 +86,7 @@ export default function TenantManagementClient({ initialTenants, csrfToken }: { 
         <div className="mb-8">
           <p className="text-sm font-semibold uppercase tracking-wide text-green-800">Platform administration</p>
           <h1 className="mt-2 text-3xl font-bold tracking-tight text-slate-950">Schools</h1>
+          <Link href="/platform/curriculum" className="mt-2 inline-block py-2 text-green-800 underline">Curriculum alignment review</Link>
           <p className="mt-2 max-w-2xl text-sm text-slate-600">Provision a school and invite its first owner. School memberships and access are verified by the API.</p>
         </div>
 

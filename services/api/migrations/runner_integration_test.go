@@ -107,6 +107,42 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 	if err := Up(ctx, pool); err != nil {
 		t.Fatalf("reapply migrations: %v", err)
 	}
+	t.Run("people_enrollment_constraints", func(t *testing.T) {
+		testPeopleEnrollmentConstraints(t, ctx, pool)
+	})
+
+	t.Run("profile_invitation_redemption", func(t *testing.T) {
+		testProfileInvitationRedemption(t, ctx, pool)
+	})
+
+	t.Run("profile_invitation_issuance", func(t *testing.T) {
+		testProfileInvitationIssuance(t, ctx, pool)
+	})
+
+	t.Run("curriculum_registry", func(t *testing.T) {
+		testCurriculumRegistry(t, ctx, pool)
+	})
+
+	t.Run("curriculum_catalog_http", func(t *testing.T) {
+		testCurriculumCatalogHTTP(t, ctx, pool)
+	})
+
+	t.Run("curriculum_alignment_review", func(t *testing.T) {
+		testCurriculumAlignmentReview(t, ctx, pool)
+	})
+
+	t.Run("curriculum_alignment_http", func(t *testing.T) {
+		testCurriculumAlignmentHTTP(t, ctx, pool)
+	})
+
+	t.Run("school_curriculum_selection", func(t *testing.T) {
+		testSchoolCurriculumSelection(t, ctx, pool)
+	})
+
+	t.Run("lesson_lifecycle", func(t *testing.T) {
+		testLessonLifecycle(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)

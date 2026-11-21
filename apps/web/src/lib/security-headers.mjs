@@ -2,7 +2,8 @@
  * @param {string} nonce
  * @returns {string}
  */
-export function buildContentSecurityPolicy(nonce) {
+export function buildContentSecurityPolicy(nonce, uploadOrigin = "") {
+  const storageOrigin = parseMediaUploadOrigin(uploadOrigin);
   if (!/^[A-Za-z0-9+/_=-]+$/.test(nonce)) {
     throw new Error("A valid CSP nonce is required");
   }
@@ -18,7 +19,7 @@ export function buildContentSecurityPolicy(nonce) {
     "style-src-attr 'none'",
     "img-src 'self' data:",
     "font-src 'self'",
-    "connect-src 'self'",
+    storageOrigin ? "connect-src 'self' " + storageOrigin : "connect-src 'self'",
     "frame-src 'none'",
     "manifest-src 'self'",
     "worker-src 'self'",
@@ -40,10 +41,10 @@ export function getBaselineSecurityHeaders() {
  * @param {string} environment
  * @returns {Array<{key: string, value: string}>}
  */
-export function getDocumentSecurityHeaders(nonce, protocol, environment) {
+export function getDocumentSecurityHeaders(nonce, protocol, environment, uploadOrigin = "") {
   const headers = [{
     key: "Content-Security-Policy",
-    value: buildContentSecurityPolicy(nonce),
+    value: buildContentSecurityPolicy(nonce, uploadOrigin),
   }];
 
   if (environment === "production" && protocol === "https:") {
@@ -54,4 +55,18 @@ export function getDocumentSecurityHeaders(nonce, protocol, environment) {
   }
 
   return headers;
+}
+
+
+/** @param {string | undefined} value */
+export function parseMediaUploadOrigin(value) {
+  if (!value || value.includes("*")) return "";
+  try {
+    const url = new URL(value);
+    if (!/^(?:[a-z0-9.-]+|\[[a-f0-9:]+\])$/.test(url.hostname)) return "";
+    const local = url.protocol === "http:" && (/^127(?:\.\d{1,3}){3}$/.test(url.hostname) || url.hostname === "[::1]");
+    return (url.protocol === "https:" || local) && value === url.origin ? url.origin : "";
+  } catch {
+    return "";
+  }
 }

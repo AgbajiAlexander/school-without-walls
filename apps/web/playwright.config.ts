@@ -1,7 +1,17 @@
 import { resolve } from "node:path";
 import { defineConfig } from "@playwright/test";
 
-const webOrigin = "https://127.0.0.1:3443";
+function testPort(name: string, fallback: number) {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isInteger(value) || value < 1 || value > 65535) {
+    throw new Error(`Invalid browser fixture port: ${name}`);
+  }
+  return value;
+}
+const proxyPort = testPort("E2E_HTTPS_PORT", 3443);
+const webPort = testPort("E2E_WEB_PORT", 3000);
+const apiPort = testPort("E2E_API_PORT", 8080);
+const webOrigin = `https://127.0.0.1:${proxyPort}`;
 
 function hasDisposableE2EDatabase() {
   const databaseUrl = process.env.DATABASE_URL;
@@ -42,30 +52,31 @@ export default defineConfig({
     {
       command: "go run ./cmd/server",
       cwd: resolve(process.cwd(), "../../services/api"),
-      url: "http://127.0.0.1:8080/ready",
+      url: `http://127.0.0.1:${apiPort}/ready`,
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
         DATABASE_URL: process.env.DATABASE_URL ?? "",
         SERVER_ENV: "staging",
+        SERVER_PORT: String(apiPort),
         CORS_ALLOWED_ORIGINS: webOrigin,
         PUBLIC_WEB_URL: webOrigin,
       },
     },
     {
-      command: "npm run start -- --hostname 127.0.0.1 --port 3000",
+      command: `npm run start -- --hostname 127.0.0.1 --port ${webPort}`,
       cwd: process.cwd(),
-      url: "http://127.0.0.1:3000/api/health",
+      url: `http://127.0.0.1:${webPort}/api/health`,
       reuseExistingServer: false,
       timeout: 120_000,
       env: {
-        API_INTERNAL_URL: "http://127.0.0.1:8080",
+        API_INTERNAL_URL: `http://127.0.0.1:${apiPort}`,
       },
     },
     {
       command: "node e2e/https-proxy.mjs",
       cwd: process.cwd(),
-      port: 3443,
+      port: proxyPort,
       reuseExistingServer: false,
       timeout: 30_000,
       env: {

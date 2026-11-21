@@ -55,3 +55,14 @@ test("HSTS is limited to production HTTPS document responses", () => {
   assert.ok(productionHTTP.every(({ key }) => key !== "Strict-Transport-Security"));
   assert.ok(developmentHTTPS.every(({ key }) => key !== "Strict-Transport-Security"));
 });
+
+
+test("CSP accepts only a single explicit media upload origin", () => {
+  const nonce = "YWJj";
+  assert.ok(buildContentSecurityPolicy(nonce, "https://storage.example.test:9443")
+    .split("; ").includes("connect-src 'self' https://storage.example.test:9443"));
+  for (const value of ["*", "https://*", "https://*.example.test", "https://storage.example.test/path", "https://user@storage.example.test",
+    "https://storage.example.test; script-src *", "http://storage.example.test"]) {
+    assert.ok(buildContentSecurityPolicy(nonce, value).split("; ").includes("connect-src 'self'"));
+  }
+});

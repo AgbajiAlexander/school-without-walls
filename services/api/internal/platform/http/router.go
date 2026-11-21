@@ -10,8 +10,12 @@ import (
 	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/academics"
 	"github.com/school-without-walls/api/internal/modules/auth"
+	"github.com/school-without-walls/api/internal/modules/curriculum"
+	"github.com/school-without-walls/api/internal/modules/learning"
+	"github.com/school-without-walls/api/internal/modules/people"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
+	"github.com/school-without-walls/api/internal/platform/media"
 	"github.com/school-without-walls/api/internal/platform/middleware"
 )
 
@@ -36,6 +40,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
+	var peopleH *people.Handler
+	var learningH *learning.Handler
+	var curriculumH *curriculum.Handler
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
 	academicRepo := cfg.AcademicRepo
@@ -53,12 +60,23 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	} else {
 		if dbWrapper, ok := cfg.DB.(*db.DB); ok && dbWrapper != nil && dbWrapper.Pool != nil {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
-			tenantRepo = tenants.NewPostgresRepository(dbWrapper.Pool)
+			tenantRepo = tenants.NewPostgresRepositoryWithStaffLimits(dbWrapper.Pool, cfg.Config.StaffInvitations)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
 			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
 			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
 			offeringRepo = academics.NewSubjectOfferingRepository(dbWrapper.Pool)
 			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
+			peopleH = people.NewHandler(people.NewRepository(dbWrapper.Pool))
+			learningH = learning.NewHandler(dbWrapper.Pool)
+			if cfg.Config.LessonMedia != nil {
+				m := cfg.Config.LessonMedia
+				store, err := media.NewStore(media.StoreConfig{Endpoint: m.Endpoint, Bucket: m.Bucket, Region: m.Region, AccessKey: m.AccessKey, SecretKey: m.SecretKey})
+				if err != nil {
+					return nil, fmt.Errorf("invalid private lesson media configuration")
+				}
+				learningH.ConfigureMedia(store, media.ClamScanner{Network: m.ScannerNetwork, Address: m.ScannerAddress})
+			}
+			curriculumH = curriculum.NewHandler(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -87,6 +105,16 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 	authH = auth.NewHandler(authSvc, isSecure, mailer, trustedProxyNets)
 	tenantSvc := tenants.NewService(tenantRepo, invitationMailer)
 	tenantH := tenants.NewHandler(tenantSvc, captureMailer)
+	// Staff-specific invitations use the existing tenant repository
+	// and the configured SMTP or local capture mailer.
+	var staffInvitationH *tenants.StaffInvitationHandler
+	if staffRepo, ok := tenantRepo.(tenants.StaffInvitationRepository); ok {
+		if staffMailer, ok := invitationMailer.(tenants.StaffInvitationMailer); ok {
+			staffInvitationH = tenants.NewStaffInvitationHandler(
+				tenants.NewStaffInvitationService(staffRepo, staffMailer),
+			)
+		}
+	}
 	academicH := academics.NewHandler(academics.NewService(academicRepo))
 	var structureH *academics.StructureHandler
 	if structureRepo != nil {
@@ -193,8 +221,74 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			protected.Get("/my/schools", tenantH.ListMine)
 			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
+			if staffInvitationH != nil {
+				protected.With(auth.RequireCSRF(authSvc)).Post(
+					"/tenants/{slug}/staff-invitations",
+					staffInvitationH.Create,
+				)
+			}
 		})
 
+		if learningH != nil {
+			if cfg.Config.LessonMedia != nil {
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media", learningH.UploadLessonMedia)
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media/{mediaID}/complete", learningH.CompleteLessonMedia)
+				v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}/media", learningH.DownloadLessonMedia)
+				v1.With(auth.RequireAuth).Get("/tenants/{slug}/lesson-reviews/{lessonID}/media", learningH.DownloadReviewAttachment)
+			}
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons", learningH.ListStudentLessons)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}", learningH.GetStudentLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/learning/lessons/{lessonID}/progress", learningH.SetLessonProgress)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings", learningH.ListTeachingOfferings)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/objectives", learningH.ListTeachingObjectives)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons", learningH.ListTeacherLessons)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}", learningH.GetTeacherLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons", learningH.CreateTeacherLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/teaching/lessons/{lessonID}", learningH.UpdateTeacherLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/publish", learningH.PublishTeacherLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/submit", learningH.SubmitTeacherLesson)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/lesson-reviews/{lessonID}/approve", learningH.ApproveLesson)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/lesson-reviews", learningH.ListLessonReviews)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/lesson-review-policy", learningH.SetLessonReviewPolicy)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/archive", learningH.ArchiveTeacherLesson)
+		}
+
+		if curriculumH != nil {
+			v1.With(auth.RequireAuth).Get("/curriculum/frameworks", curriculumH.ListFrameworks)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/frameworks/import", curriculumH.ImportFramework)
+			v1.With(auth.RequireAuth).Get("/curriculum/frameworks/{frameworkID}/draft", curriculumH.PreviewImportedFramework)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/frameworks/{frameworkID}/publish", curriculumH.PublishFramework)
+			v1.With(auth.RequireAuth).Get("/curriculum/objectives", curriculumH.ListObjectives)
+			v1.With(auth.RequireAuth).Get("/curriculum/alignments", curriculumH.ListVerifiedAlignments)
+			v1.With(auth.RequireAuth).Get("/curriculum/alignments/drafts", curriculumH.ListDraftAlignments)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments", curriculumH.CreateAlignment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments/{alignmentID}/review", curriculumH.ReviewAlignment)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}/curriculum", curriculumH.ListSchoolSelections)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/curriculum", curriculumH.CreateSchoolSelection)
+		}
+
+		if peopleH != nil {
+			if staffInvitationH != nil {
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/invitations", staffInvitationH.CreateStudent)
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/guardians/{guardianID}/invitations", staffInvitationH.CreateGuardian)
+			}
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff", peopleH.ListStaff)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff/candidates", peopleH.ListStaffCandidates)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/staff", peopleH.CreateStaff)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/staff/{staffID}", peopleH.UpdateStaff)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students", peopleH.ListStudents)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students", peopleH.CreateStudent)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students/{studentID}", peopleH.GetStudent)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}", peopleH.UpdateStudent)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/guardians", peopleH.ListGuardians)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/guardians", peopleH.CreateGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/guardians/{guardianID}", peopleH.UpdateGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}/guardians/{guardianID}", peopleH.LinkGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Delete("/tenants/{slug}/students/{studentID}/guardians/{guardianID}", peopleH.UnlinkGuardian)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students/{studentID}/enrollments", peopleH.ListEnrollments)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/enrollments", peopleH.CreateEnrollment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/enrollments/{enrollmentID}/transfers", peopleH.TransferEnrollment)
+		}
 		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions", academicH.ListSessions)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions", academicH.CreateSession)
 		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}", academicH.GetSession)

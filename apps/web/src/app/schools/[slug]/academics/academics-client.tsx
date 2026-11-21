@@ -5,6 +5,7 @@ import Link from "next/link";
 import SessionCreateForm from "./session-create-form";
 import SessionEditForm from "./session-edit-form";
 import GradeLevelsPanel from "./grade-levels-panel";
+import SubjectsPanel from "./subjects-panel";
 import ClassesPanel from "./classes-panel";
 import TermConfigureForm from "./term-configure-form";
 import SessionActivationControl from "./session-activation-control";
@@ -185,9 +186,7 @@ export default function AcademicsClient({
 
   const selected = sessions.find((item) => item.id === selectedID);
 
-  const canManage = ["SCHOOL_OWNER", "SCHOOL_ADMIN", "PRINCIPAL"].includes(
-    school.current_role ?? "",
-  );
+  const canManage = school.can_manage_academics === true;
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -222,7 +221,7 @@ export default function AcademicsClient({
           {[
             ["Sessions and terms", "Available now"],
             ["Levels and classes", "Available now"],
-            ["Subjects and offerings", "Next implementation"],
+            ["Subjects and offerings", "In progress"],
             ["Teacher assignments", "Next implementation"],
           ].map(([title, detail]) => (
             <section
@@ -331,6 +330,12 @@ export default function AcademicsClient({
                 <h3 className="text-lg font-semibold text-slate-900">
                   {selected?.name ?? "Select a session"}
                 </h3>
+                {canManage && selected && (
+                  <Link className="inline-block py-2 text-sm text-green-800 underline"
+                    href={`/schools/${encodeURIComponent(school.slug)}/academics/${encodeURIComponent(selected.id)}/curriculum`}>
+                    Curriculum editions
+                  </Link>
+                )}
                 {canManage && selected?.status === "DRAFT" && (
                   <SessionEditForm
                     key={`${school.slug}:${selected.id}`}
@@ -435,6 +440,11 @@ export default function AcademicsClient({
           )}
         </section>
 
+        <SubjectsPanel
+          key={school.slug}
+          schoolSlug={school.slug}
+          currentRole={school.current_role ?? null}
+        />
         <GradeLevelsPanel
           onCreated={() => setGradeLevelsVersion((value) => value + 1)}
           key={`${school.id}:${school.slug}`}
