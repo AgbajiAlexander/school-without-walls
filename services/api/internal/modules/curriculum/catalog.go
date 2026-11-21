@@ -72,13 +72,27 @@ type objective struct {
 }
 
 func (h *Handler) ListFrameworks(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	stage, role := r.URL.Query().Get("stage"), r.URL.Query().Get("curriculum_role")
+	if (stage != "" && !validCurriculumStage(stage)) ||
+		(role != "" && (stage == "" || (role != "PRIMARY" && role != "ENRICHMENT"))) {
+		invalidQuery(w, r)
+		return
+	}
 	browse(h, w, r, memberAccess, pgx.RowToStructByName[framework], func(item framework) uuid.UUID { return item.ID },
 		`SELECT id, jurisdiction, publisher, title, edition, framework_kind,
 			to_char(effective_from, 'YYYY-MM-DD') AS effective_from,
 			to_char(effective_to, 'YYYY-MM-DD') AS effective_to, source_url, license_note, status
 		  FROM curriculum_framework_versions
 		  WHERE status = 'PUBLISHED' AND ($1::uuid IS NULL OR id > $1)
-		  ORDER BY id LIMIT $2`, nil)
+		    AND ($3::text = '' OR EXISTS (
+		        SELECT 1 FROM curriculum_objectives o
+		        WHERE o.framework_version_id = curriculum_framework_versions.id AND o.stage = $3
+		    ))
+		    AND ($4::text = '' OR ($4 = 'ENRICHMENT' AND framework_kind = 'ENRICHMENT')
+		        OR ($4 = 'PRIMARY' AND (framework_kind = 'NIGERIAN_PRIMARY'
+		            OR ($3 = 'EARLY_YEARS' AND framework_kind = 'DEVELOPMENTAL'))))
+		  ORDER BY id LIMIT $2`, []any{stage, role})
 }
 
 func (h *Handler) ListObjectives(w http.ResponseWriter, r *http.Request) {
@@ -90,9 +104,7 @@ func (h *Handler) ListObjectives(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	stage := q.Get("stage")
-	switch stage {
-	case "", "EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY":
-	default:
+	if stage != "" && !validCurriculumStage(stage) {
 		invalidQuery(w, r)
 		return
 	}
@@ -182,4 +194,13 @@ func readCatalog[T any](ctx context.Context, pool *pgxpool.Pool, actor uuid.UUID
 
 func invalidQuery(w http.ResponseWriter, r *http.Request) {
 	response.ErrorJSON(w, r, http.StatusUnprocessableEntity, response.ErrCodeInvalidInput, "Invalid curriculum query", nil)
+}
+
+func validCurriculumStage(stage string) bool {
+	switch stage {
+	case "EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY":
+		return true
+	default:
+		return false
+	}
 }

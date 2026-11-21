@@ -330,6 +330,12 @@ export default function AcademicsClient({
                 <h3 className="text-lg font-semibold text-slate-900">
                   {selected?.name ?? "Select a session"}
                 </h3>
+                {canManage && selected && (
+                  <Link className="inline-block py-2 text-sm text-green-800 underline"
+                    href={`/schools/${encodeURIComponent(school.slug)}/academics/${encodeURIComponent(selected.id)}/curriculum`}>
+                    Curriculum editions
+                  </Link>
+                )}
                 {canManage && selected?.status === "DRAFT" && (
                   <SessionEditForm
                     key={`${school.slug}:${selected.id}`}

@@ -53,6 +53,26 @@ test("academic session persists and Go rejects missing CSRF, foreign schools and
   await expect(page.getByText("2030/2031 fixture", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Denied fixture", { exact: true })).toHaveCount(0);
 
+  await page.getByRole("button", { name: /2030\/2031 fixture/ }).click();
+  const editionLink = page.getByRole("link", { name: "Curriculum editions" });
+  const editionPath = await editionLink.getAttribute("href");
+  if (!editionPath) throw new Error("Missing curriculum link for the selected session");
+  await editionLink.click();
+  await expect(page.getByRole("heading", { name: "Session curriculum editions" })).toBeVisible();
+  await expect(page.getByLabel("Framework edition").locator("option")).toHaveCount(2);
+  await page.getByLabel("Framework edition").selectOption({ label: "Fictional Nigerian Framework \u00b7 Example 1 \u00b7 Fictional Publisher" });
+  await page.getByRole("button", { name: "Save curriculum edition" }).click();
+  await expect(page.getByText("Curriculum edition saved.")).toBeVisible();
+  await page.reload();
+  await expect(page.getByText(/Primary curriculum.*Fictional Nigerian Framework/)).toBeVisible();
+  await page.getByLabel("Curriculum role").selectOption("ENRICHMENT");
+  await page.getByRole("button", { name: "Show eligible editions" }).click();
+  await page.getByLabel("Framework edition").selectOption({ label: "Fictional British Framework \u00b7 Example 1 \u00b7 Fictional Publisher" });
+  await page.getByRole("button", { name: "Save curriculum edition" }).click();
+  await expect(page.getByText(/Optional enrichment.*Fictional British Framework/)).toBeVisible();
+  await page.goto(editionPath.replace(school, otherSchool));
+  await expect(page.getByRole("status")).toHaveText("Curriculum selection is unavailable for this school session.");
+
   expect(await attemptCreate(page, otherSchool, true)).toEqual({ status: 404, message: "Resource not found" });
   await page.goto(`/schools/${otherSchool}/academics`);
   await expect(page.getByRole("heading", { name: "School access unavailable" })).toBeVisible();
@@ -64,6 +84,10 @@ test("academic session persists and Go rejects missing CSRF, foreign schools and
     await teacher.goto(academicPath);
     await expect(teacher.getByText("2030/2031 fixture", { exact: true }).first()).toBeVisible();
     await expect(teacher.getByRole("button", { name: "Create draft session" })).toHaveCount(0);
+    await expect(teacher.getByRole("link", { name: "Curriculum editions" })).toHaveCount(0);
+    await teacher.goto(editionPath);
+    await expect(teacher.getByRole("status")).toHaveText("Curriculum selection is unavailable for this school session.");
+    await teacher.goto(academicPath);
     expect(await attemptCreate(teacher, school, true)).toEqual({ status: 403, message: "Access denied" });
     await teacher.reload();
     await expect(teacher.getByText("2030/2031 fixture", { exact: true }).first()).toBeVisible();

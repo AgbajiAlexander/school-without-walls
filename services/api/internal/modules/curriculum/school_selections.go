@@ -148,9 +148,7 @@ func (h *Handler) CreateSchoolSelection(w http.ResponseWriter, r *http.Request) 
 }
 
 func validSelection(input selectionInput) bool {
-	switch input.Stage {
-	case "EARLY_YEARS", "PRIMARY", "JUNIOR_SECONDARY", "SENIOR_SECONDARY":
-	default:
+	if !validCurriculumStage(input.Stage) {
 		return false
 	}
 	return (input.CurriculumRole == "PRIMARY" || input.CurriculumRole == "ENRICHMENT") &&

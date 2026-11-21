@@ -341,3 +341,11 @@ The disposable PostgreSQL test covered cross-school rejection, edition eligibili
 Active School Owners, School Administrators, and Principals may use GET and POST /api/v1/tenants/{slug}/academic-sessions/{sessionID}/curriculum. GET returns the current selections and each edition status, including withdrawn editions. The write requires authentication and CSRF, accepts stage, curriculum_role, framework_version_id, and expected_revision, and returns the newly appended revision. Use expected_revision zero for a first selection. A stale revision or archived session returns HTTP 409.
 
 Writes recheck authorization under tenant, user, membership and session locks. The session lock serializes revision decisions, and the audit event commits with the appended selection. The focused PostgreSQL HTTP regression verified concurrent conflict handling, one audit for the successful write, read-only archived sessions, missing CSRF, foreign school and teacher denial, and permission loss when the active Principal role was suspended. Dashboard controls and downstream historical lesson/report references remain open.
+
+### SWW-006 school-session selection dashboard
+
+Academic managers can open Curriculum editions for the selected session, filter published choices by stage and curriculum role, and save through the CSRF-protected revision API. The page identifies withdrawn selections, displays archived sessions as read-only, and refreshes after a stale-write conflict. The framework catalog accepts optional stage and curriculum_role filters. The write remains the authoritative eligibility check.
+
+The required PostgreSQL Go suite, vet, build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against disposable PostgreSQL and the real API. The extended academics journey saved separate Nigerian primary and optional British enrichment selections, checked persistence, and verified teacher and foreign-school denial.
+
+Rights-reviewed content and downstream historical lesson/report integration remain open.

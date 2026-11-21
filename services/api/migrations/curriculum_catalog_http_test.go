@@ -105,6 +105,11 @@ func testCurriculumCatalogHTTP(t *testing.T, ctx context.Context, pool *pgxpool.
 		}
 		delete(known, value.ID)
 	}
+	filtered, _ := get("frameworks?stage=PRIMARY&curriculum_role=PRIMARY", memberToken, 200)
+	if len(filtered) != 1 || filtered[0].ID != nigeria {
+		t.Fatal("expected only the eligible published Nigerian edition")
+	}
+	get("frameworks?curriculum_role=PRIMARY", memberToken, 422)
 	for _, id := range []uuid.UUID{draft, withdrawn, uuid.New()} {
 		items, _ := get("objectives?framework_version_id="+id.String(), memberToken, 200)
 		if len(items) != 0 {
