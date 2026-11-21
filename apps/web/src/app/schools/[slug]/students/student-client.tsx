@@ -1,5 +1,6 @@
 "use client";
 
+import ProfileInvitation from "../profile-invitation";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
@@ -120,6 +121,9 @@ export default function StudentClient({ slug, csrfToken, students, nextPage, fir
                 <Link href={`/schools/${encodeURIComponent(slug)}/students/${encodeURIComponent(student.id)}/enrollments`} className="min-h-11 px-2 py-2 text-green-800 underline">
                   Enrollment<span className="sr-only"> for {student.display_name}</span>
                 </Link>
+                {!unavailable && student.status === "ACTIVE" && (
+                  <ProfileInvitation key={slug} slug={slug} profileID={student.id} kind="students" name={student.display_name} csrf={csrfToken} />
+                )}
               </li>
             ))}
           </ul>

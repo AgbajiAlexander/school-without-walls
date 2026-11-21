@@ -247,3 +247,31 @@ All four Edge journeys passed against production Next.js, the real Go API and di
 - The page uses the existing Go authorization, CSRF, transaction, and audit controls. Initial placements and transfers refresh history after success. A stale transfer or duplicate enrollment shows a conflict and refreshes history. Student and guardian account onboarding remains open.
 
 All five Edge journeys passed against production Next.js, Go, and disposable PostgreSQL. The enrollment journey selected an active term, class and arm, transferred to a second class, and verified one ended and one active placement after reload. A cross-school route showed no placement details. Mandatory PostgreSQL Go tests, Go vet and build, 168 frontend tests, TypeScript, lint, production build, and diff whitespace checks passed.
+
+### SWW-005 local invitation integration checkpoint
+
+The local onboarding integration branch combines the verified people and enrollment checkpoint with both Staff Invitation commits from PR #9. The source commits remain traceable in the cherry-pick messages.
+
+The combined branch passed the migration and full Go regression with PostgreSQL required, Go vet and build, all 189 frontend tests, TypeScript, lint, and the Next.js production build. Five academics and people journeys passed in Edge. A separate Edge run passed both staff roles in the existing Staff Invitation journey using the real Go API, disposable loopback PostgreSQL, and local mail capture.
+
+Student and guardian account invitation and profile binding remain open under FR-ID-004. This checkpoint verifies the existing staff flow on the combined branch.
+
+### SWW-005 profile invitation redemption
+
+Migration 000010 requires each STUDENT or PARENT invitation to reference exactly one profile of the corresponding kind in the same tenant. Redemption locks the profile after the tenant, user, and membership checks, then rechecks expiry with the database clock. Profile binding, membership grant, token consumption, session creation, and acceptance audit share one transaction. A guardian invitation must still match the stored contact address, and a student must still be active and unbound.
+
+The focused PostgreSQL test exercises delivery gating, cross-tenant target rejection, changed guardian contact rollback, exact account binding, and replay for both roles. Its fixtures insert invitations directly. The manager issuance API, email handoff, and browser workflow are still open. Before enabling issuance, migrate the database and upgrade or drain all older API instances, because their redemption code does not bind the target profile. Check for any legacy unbound STUDENT or PARENT invitation rows before applying the migration. The constraint rejects those rows instead of guessing a target.
+
+### SWW-005 profile invitation issuance API
+
+School Owners, School Administrators, and Principals with active membership may issue account invitations in an active school through the authenticated, CSRF-protected student and guardian profile routes. The student route takes an email address. The guardian route uses the profile's stored contact address. The routes determine the role on the server and return only the invitation identifier and expiry after successful mail handoff and database confirmation.
+
+Staff and profile issuance share the configured rolling actor and school quotas under the same tenant lock. Duplicate invitations do not consume quota. Delivery or confirmation failure retains the issuance charge, and uncertain handoff can leave an unusable invitation awaiting delivery. A pending invitation for the same profile blocks a replacement until the first expires. Keep the documented rollout and ingress restrictions, and complete migration 000010 and the API upgrade before exposing either route.
+
+The PostgreSQL HTTP regression covers authorization, CSRF, cross-school profile denial, guardian address override rejection, invalid student email, conflict, quota and retry guidance, local mail capture, acceptance of both captured links, and replay rejection. Browser manager controls and browser-level onboarding remain open.
+
+### SWW-005 local browser acceptance
+
+Student and guardian account invitations are available from the respective profile lists. Edge verified both account journeys using the real Go API, disposable loopback PostgreSQL, and local mail capture. The test confirmed accepted account roles after fresh sign-in, access to the intended student record, denial of the manager directory, replay rejection, and immediate guardian access revocation after unlinking. The existing staff invitation browser journey also passed in the same run. The 189 frontend tests, TypeScript, lint, and the production build passed.
+
+SWW-005 local acceptance is complete. The migration and API rollout order above still applies before hosted exposure.

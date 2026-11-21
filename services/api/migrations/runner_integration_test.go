@@ -111,6 +111,14 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 		testPeopleEnrollmentConstraints(t, ctx, pool)
 	})
 
+	t.Run("profile_invitation_redemption", func(t *testing.T) {
+		testProfileInvitationRedemption(t, ctx, pool)
+	})
+
+	t.Run("profile_invitation_issuance", func(t *testing.T) {
+		testProfileInvitationIssuance(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)

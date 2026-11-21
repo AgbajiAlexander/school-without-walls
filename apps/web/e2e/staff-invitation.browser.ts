@@ -276,3 +276,75 @@ test("fictional owners invite both staff roles and the browser enforces invitati
   expect(secretInConsole.length).toBe(0);
   await platformContext.close();
 });
+
+test("fictional student and guardian activate accounts from profile invitations", async ({ browser, page: owner }) => {
+  const suffix = randomBytes(4).toString("hex");
+  const school = { slug: `browser-people-${suffix}`, name: "Fictional People School" };
+  const ownerEmail = `people-owner-${suffix}@school.invalid`;
+  const studentEmail = `learner-${suffix}@school.invalid`;
+  const guardianEmail = `guardian-${suffix}@school.invalid`;
+  const platformPassword = process.env.SWW_B12_ADMIN_PASSWORD;
+  if (!platformPassword) throw new Error("Missing ephemeral fixture credential");
+  const platformContext = await browser.newContext({ baseURL: origin });
+  await signIn(await platformContext.newPage(), operator, platformPassword);
+  const provision = await post(platformContext, "/api/v1/platform/tenants", {
+    ...school, owner_email: ownerEmail, locale: "en-NG", timezone: "Africa/Lagos",
+  });
+  expect(provision.status()).toBe(201);
+  await redeem(owner, await captured(platformContext, ownerEmail, school.name), randomBytes(24).toString("base64url"));
+
+  const base = `/schools/${school.slug}`;
+  const api = `/api/v1/tenants/${school.slug}`;
+  await owner.goto(`${base}/students`);
+  await owner.getByLabel("Admission number").fill("INVITE-E2E");
+  await owner.getByLabel("Display name").fill("Fictional Invited Learner");
+  await owner.getByRole("button", { name: "Save student" }).click();
+  const link = owner.getByRole("link", { name: "Guardians for Fictional Invited Learner" });
+  const guardianPage = await link.getAttribute("href");
+  const studentID = new URL(guardianPage!, origin).searchParams.get("student_id");
+  if (!studentID) throw new Error("Student route missing");
+  await owner.getByRole("button", { name: "Invite Fictional Invited Learner" }).click();
+  await owner.getByLabel("Student account email").fill(studentEmail);
+  await owner.getByRole("button", { name: "Send account invitation" }).click();
+  await expect(owner.getByRole("status").filter({ hasText: "Invitation sent." })).toBeVisible();
+
+  await link.click();
+  await owner.getByLabel("Guardian display name").fill("Fictional Invited Guardian");
+  await owner.getByLabel("Contact email").fill(guardianEmail);
+  await owner.getByRole("button", { name: "Save guardian profile" }).click();
+  await owner.getByLabel("Guardian to link").selectOption({ label: `Fictional Invited Guardian — ${guardianEmail}` });
+  await owner.getByLabel("Relationship").fill("Parent");
+  await owner.getByRole("button", { name: "Save relationship" }).click();
+  await owner.getByRole("button", { name: "Invite Fictional Invited Guardian" }).click();
+  await owner.getByRole("button", { name: "Send account invitation" }).click();
+  await expect(owner.getByRole("status").filter({ hasText: "Invitation sent." })).toBeVisible();
+
+  for (const [email, role] of [[studentEmail, "STUDENT"], [guardianEmail, "PARENT"]]) {
+    const password = randomBytes(24).toString("base64url");
+    const invitation = await captured(platformContext, email, school.name);
+    const activation = await browser.newContext({ baseURL: origin });
+    await redeem(await activation.newPage(), invitation, password);
+    await activation.close();
+    const fresh = await browser.newContext({ baseURL: origin });
+    await signIn(await fresh.newPage(), email, password);
+    const schools = await fresh.request.get("/api/v1/my/schools");
+    expect(schools.status()).toBe(200);
+    const schoolsPayload = await schools.json();
+    expect(JSON.stringify(schoolsPayload)).toContain(role);
+    const personalRecord = await fresh.request.get(`${api}/students/${studentID}`);
+    expect(personalRecord.status()).toBe(200);
+    expect(await personalRecord.text()).toContain("Fictional Invited Learner");
+    expect((await fresh.request.get(`${api}/students`)).status()).toBe(404);
+    const replay = await withSafeFixtureDiagnostics(() => fresh.request.post("/api/v1/invitations/accept", {
+      data: { token: invitation.split("/").at(-1), full_name: "Fictional Replay", password },
+    }));
+    expect(replay.status()).toBe(422);
+    if (role === "PARENT") {
+      await owner.getByRole("button", { name: "Unlink Fictional Invited Guardian" }).click();
+      await owner.getByRole("button", { name: "Confirm unlink" }).click();
+      await expect(owner.getByText("Guardian unlinked.")).toBeVisible();
+      expect((await fresh.request.get(`${api}/students/${studentID}`)).status()).toBe(404);
+    }
+    await fresh.close();
+  }
+});

@@ -571,6 +571,11 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 		}
 	}
 
+	profileID, err := lockInvitationProfile(ctx, tx, invitation)
+	if err != nil {
+		return nil, err
+	}
+
 	// The invitation may have expired while waiting for a row lock.
 	// Check the database wall clock again before granting access.
 	var unexpired bool
@@ -588,6 +593,11 @@ func (r *pgRepository) AcceptInvitation(ctx context.Context, tokenHash string, i
 			VALUES ($1, $2, $3, $4, 'ACTIVE', CURRENT_TIMESTAMP)
 		`, uuid.New(), invitation.TenantID, user.ID, invitation.TargetRole); err != nil {
 			return nil, fmt.Errorf("failed to create invited tenant membership: %w", err)
+		}
+		if profileID != uuid.Nil {
+			if err := bindInvitationProfile(ctx, tx, invitation.TargetRole, *invitation.TenantID, profileID, user.ID); err != nil {
+				return nil, err
+			}
 		}
 		event.TenantID = invitation.TenantID
 		if invitation.TargetRole == "SCHOOL_OWNER" {

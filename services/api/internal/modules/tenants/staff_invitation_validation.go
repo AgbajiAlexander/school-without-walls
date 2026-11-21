@@ -16,7 +16,6 @@ func validateStaffInvitationInput(
 	request StaffInvitationRequest,
 ) (string, StaffInvitationRequest, error) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	request.Email = strings.ToLower(strings.TrimSpace(request.Email))
 	request.Role = strings.TrimSpace(request.Role)
 
 	if len(slug) == 0 || len(slug) > 80 ||
@@ -29,16 +28,25 @@ func validateStaffInvitationInput(
 		return "", StaffInvitationRequest{}, ErrInvalidInput
 	}
 
-	if len(request.Email) == 0 ||
-		len(request.Email) > 254 ||
-		strings.IndexFunc(request.Email, unicode.IsControl) >= 0 {
-		return "", StaffInvitationRequest{}, ErrInvalidInput
+	email, err := normalizeInvitationEmail(request.Email)
+	if err != nil {
+		return "", StaffInvitationRequest{}, err
 	}
-
-	address, err := mail.ParseAddress(request.Email)
-	if err != nil || address.Address != request.Email {
-		return "", StaffInvitationRequest{}, ErrInvalidInput
-	}
-
+	request.Email = email
 	return slug, request, nil
+}
+
+func normalizeInvitationEmail(email string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if len(email) == 0 ||
+		len(email) > 254 ||
+		strings.IndexFunc(email, unicode.IsControl) >= 0 {
+		return "", ErrInvalidInput
+	}
+
+	address, err := mail.ParseAddress(email)
+	if err != nil || address.Address != email {
+		return "", ErrInvalidInput
+	}
+	return email, nil
 }

@@ -131,7 +131,11 @@ func (s *StaffInvitationService) InviteStaff(
 		)
 	}
 
-	err = s.mailer.SendStaffInvitation(
+	return s.deliverInvitation(ctx, invitation, actorID, requestID, rawToken, schoolName, "tenant.staff_invitation.delivery_failed")
+}
+
+func (s *StaffInvitationService) deliverInvitation(ctx context.Context, invitation *auth.Invitation, actorID uuid.UUID, requestID, rawToken, schoolName, failureAction string) (*StaffInvitationResult, error) {
+	err := s.mailer.SendStaffInvitation(
 		ctx,
 		invitation.InvitedEmail,
 		rawToken,
@@ -142,7 +146,7 @@ func (s *StaffInvitationService) InviteStaff(
 
 	if err != nil {
 		failureEvent := &auth.AuditEvent{
-			Action:    "tenant.staff_invitation.delivery_failed",
+			Action:    failureAction,
 			ActorID:   &actorID,
 			RequestID: requestID,
 			MetadataRedacted: map[string]any{

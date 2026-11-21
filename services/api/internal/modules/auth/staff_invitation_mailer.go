@@ -19,8 +19,12 @@ func StaffInvitationEmail(
 		roleName = "School Administrator"
 	case "PRINCIPAL":
 		roleName = "Principal"
+	case "STUDENT":
+		roleName = "Student"
+	case "PARENT":
+		roleName = "Guardian"
 	default:
-		return "", "", errors.New("unsupported staff invitation role")
+		return "", "", errors.New("unsupported invitation role")
 	}
 
 	// School names are editable. Keep their whitespace from creating mail header lines.

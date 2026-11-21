@@ -215,6 +215,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		})
 
 		if peopleH != nil {
+			if staffInvitationH != nil {
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/invitations", staffInvitationH.CreateStudent)
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/guardians/{guardianID}/invitations", staffInvitationH.CreateGuardian)
+			}
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff", peopleH.ListStaff)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff/candidates", peopleH.ListStaffCandidates)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/staff", peopleH.CreateStaff)

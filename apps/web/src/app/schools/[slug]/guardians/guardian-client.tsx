@@ -1,5 +1,6 @@
 "use client";
 
+import ProfileInvitation from "../profile-invitation";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useRef, useState, type FormEvent } from "react";
@@ -163,6 +164,9 @@ export default function GuardianClient({ slug, csrf, guardians, student, linked,
                   onClick={() => { setEditing(record.id); setDisplayName(record.display_name); setEmail(record.contact_email ?? ""); setError(""); setNotice(""); }}>
                   Edit <span className="sr-only">{record.display_name}</span>
                 </button>
+                {!denied && record.contact_email && (
+                  <ProfileInvitation key={slug} slug={slug} profileID={record.id} kind="guardians" name={record.display_name} csrf={csrf} />
+                )}
               </li>
             ))}
           </ul>
