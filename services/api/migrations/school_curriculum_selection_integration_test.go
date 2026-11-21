@@ -74,6 +74,8 @@ func testSchoolCurriculumSelection(t *testing.T, ctx context.Context, pool *pgxp
 		t.Fatal("history should retain the original edition and the current choice should remain explicit after withdrawal")
 	}
 	exec("23514", choose, uuid.New(), school, session, "PRIMARY", "PRIMARY", 3, second, actor)
-	exec("", `UPDATE academic_sessions SET status='ARCHIVED' WHERE id=$1`, session)
-	exec("23514", choose, uuid.New(), school, session, "PRIMARY", "PRIMARY", 3, first, actor)
+	t.Run("http", func(t *testing.T) {
+		testSchoolCurriculumHTTP(t, ctx, pool, school, session, actor, first, second)
+	})
+	exec("23514", choose, uuid.New(), school, session, "PRIMARY", "PRIMARY", 4, first, actor)
 }

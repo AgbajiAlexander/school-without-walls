@@ -224,6 +224,8 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			v1.With(auth.RequireAuth).Get("/curriculum/alignments/drafts", curriculumH.ListDraftAlignments)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments", curriculumH.CreateAlignment)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/curriculum/alignments/{alignmentID}/review", curriculumH.ReviewAlignment)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}/curriculum", curriculumH.ListSchoolSelections)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions/{sessionID}/curriculum", curriculumH.CreateSchoolSelection)
 		}
 
 		if peopleH != nil {

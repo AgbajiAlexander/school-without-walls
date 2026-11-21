@@ -335,3 +335,9 @@ Migration 000013 implements the FR-CUR-005 storage foundation. Each school, sess
 Selections require a same-school session and a published edition with an objective in the selected stage. The role distinguishes Nigerian primary curriculum and optional enrichment. A published developmental framework may serve as primary for Early Years. Archived sessions retain their selections and reject new revisions.
 
 The disposable PostgreSQL test covered cross-school rejection, edition eligibility, one sequential history per slot, optional enrichment and developmental selections, immutable history, withdrawal, and archived-session rejection. The school manager API, dashboard selection and downstream historical lesson/report integration remain open.
+
+### SWW-006 school-session selection API
+
+Active School Owners, School Administrators, and Principals may use GET and POST /api/v1/tenants/{slug}/academic-sessions/{sessionID}/curriculum. GET returns the current selections and each edition status, including withdrawn editions. The write requires authentication and CSRF, accepts stage, curriculum_role, framework_version_id, and expected_revision, and returns the newly appended revision. Use expected_revision zero for a first selection. A stale revision or archived session returns HTTP 409.
+
+Writes recheck authorization under tenant, user, membership and session locks. The session lock serializes revision decisions, and the audit event commits with the appended selection. The focused PostgreSQL HTTP regression verified concurrent conflict handling, one audit for the successful write, read-only archived sessions, missing CSRF, foreign school and teacher denial, and permission loss when the active Principal role was suspended. Dashboard controls and downstream historical lesson/report references remain open.
