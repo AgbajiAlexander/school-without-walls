@@ -311,3 +311,11 @@ Active platform administrators create a draft with POST /api/v1/curriculum/align
 Active school members can read verified links through GET /api/v1/curriculum/alignments with primary_objective_id and optional after cursor. The result includes the review date and omits the internal reviewer identifier. The PostgreSQL HTTP regression verified draft invisibility, forbidden school-role writes, CSRF, reviewer-field rejection, duplicate and premature approvals, audit counts, grant removal, and suppression after withdrawal.
 
 The review UI and verified alignment display, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 verified alignment display
+
+Members can open verified enrichment for a published Nigerian objective. The browser shows the related objective, relationship, review date, edition, publisher, and source and license information. The read endpoint supplies these fields from the verified view and published registry. Draft and withdrawn mappings remain excluded, and reviewer identity stays internal.
+
+The full Go suite with PostgreSQL required, Go vet and build, all 189 frontend tests, TypeScript, lint, and the production build passed. All six Edge journeys passed against the real API and disposable PostgreSQL. The curriculum journey confirmed the optional enrichment label, provenance link, draft exclusion, and return to the selected stage.
+
+The platform review interface, tenant edition selection, and rights-reviewed content remain open.

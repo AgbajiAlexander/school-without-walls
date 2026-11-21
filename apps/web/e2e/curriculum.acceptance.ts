@@ -26,6 +26,14 @@ test("a school member browses published editions and filters objectives on mobil
   await page.getByRole("button", { name: "Filter objectives" }).click();
   await expect(page.getByText("Count the objects in a fictional group.")).toBeVisible();
   await expect(page.getByText("Compare two fictional shapes.")).toHaveCount(0);
+  await page.getByRole("link", { name: "Verified enrichment for FIX.COUNT" }).click();
+  await expect(page.getByRole("heading", { name: "Verified enrichment alignments" })).toBeVisible();
+  await expect(page.getByText("Optional enrichment", { exact: false })).toContainText("Complementary");
+  await expect(page.getByText("Group fictional objects in pairs.")).toBeVisible();
+  await expect(page.getByText("Fictional draft alignment text.")).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Publisher source" })).toHaveAttribute("href", "https://example.test/enrichment");
+  await page.getByRole("link", { name: "Back to objectives" }).click();
+  await expect(page.getByLabel("Education stage")).toHaveValue("PRIMARY");
   await page.getByLabel("Education stage").selectOption("SENIOR_SECONDARY");
   await page.getByRole("button", { name: "Filter objectives" }).click();
   await expect(page.getByRole("status")).toHaveText("No published objectives match this selection.");

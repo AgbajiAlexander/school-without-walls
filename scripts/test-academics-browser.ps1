@@ -93,8 +93,22 @@ INSERT INTO curriculum_objectives (id,framework_version_id,stage,grade_band,subj
 VALUES
     (gen_random_uuid(),'82c5c04e-9009-443e-829a-ac8443248780','PRIMARY','Primary 1','Mathematics','Number','FIX.COUNT','Count the objects in a fictional group.'),
     (gen_random_uuid(),'82c5c04e-9009-443e-829a-ac8443248780','EARLY_YEARS','Nursery','Mathematics','Shape','FIX.SHAPE','Compare two fictional shapes.');
+INSERT INTO curriculum_objectives (id,framework_version_id,stage,grade_band,subject,strand,code,objective_text)
+SELECT gen_random_uuid(), f.id, 'PRIMARY', 'Year 1', 'Mathematics', 'Number', x.code, x.objective_text
+FROM curriculum_framework_versions f CROSS JOIN (VALUES
+    ('FIX.EXTEND', 'Group fictional objects in pairs.'),
+    ('FIX.DRAFT', 'Fictional draft alignment text.')
+) AS x(code, objective_text)
+WHERE f.title = 'Fictional British Framework';
 UPDATE curriculum_framework_versions SET status = 'PUBLISHED'
 WHERE title IN ('Fictional Nigerian Framework', 'Fictional British Framework');
+INSERT INTO curriculum_objective_alignments (id, primary_objective_id, related_objective_id, relation)
+SELECT gen_random_uuid(), p.id, r.id, 'COMPLEMENTARY'
+FROM curriculum_objectives p CROSS JOIN curriculum_objectives r
+WHERE p.code = 'FIX.COUNT' AND r.code IN ('FIX.EXTEND', 'FIX.DRAFT');
+UPDATE curriculum_objective_alignments a SET review_status = 'HUMAN_REVIEWED', reviewer_id = u.id
+FROM curriculum_objectives r CROSS JOIN users u
+WHERE a.related_objective_id = r.id AND r.code = 'FIX.EXTEND' AND u.email = 'academic-owner@example.test';
 '@ | & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
  if($LASTEXITCODE){throw 'fixture setup failed'}
  Set-Location "$root/apps/web"

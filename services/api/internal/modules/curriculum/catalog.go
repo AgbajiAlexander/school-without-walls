@@ -45,6 +45,7 @@ type objective struct {
 	Strand             string    `json:"strand"`
 	Code               string    `json:"code"`
 	ObjectiveText      string    `json:"objective_text"`
+	FrameworkKind      string    `json:"framework_kind"`
 }
 
 func (h *Handler) ListFrameworks(w http.ResponseWriter, r *http.Request) {
@@ -73,7 +74,7 @@ func (h *Handler) ListObjectives(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	browse(h, w, r, pgx.RowToStructByName[objective], func(item objective) uuid.UUID { return item.ID },
-		`SELECT o.id, o.framework_version_id, o.stage, o.grade_band, o.subject, o.strand, o.code, o.objective_text
+		`SELECT o.id, o.framework_version_id, o.stage, o.grade_band, o.subject, o.strand, o.code, o.objective_text, f.framework_kind
 		  FROM curriculum_objectives o JOIN curriculum_framework_versions f ON f.id = o.framework_version_id
 		  WHERE f.status = 'PUBLISHED' AND o.framework_version_id = $3
 		    AND ($4::text = '' OR o.stage = $4) AND ($1::uuid IS NULL OR o.id > $1)

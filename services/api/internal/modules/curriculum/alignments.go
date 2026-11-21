@@ -32,6 +32,13 @@ type verifiedAlignment struct {
 	RelatedObjectiveID uuid.UUID `json:"related_objective_id"`
 	Relation           string    `json:"relation"`
 	ReviewedAt         time.Time `json:"reviewed_at"`
+	RelatedCode        string    `json:"related_code"`
+	RelatedText        string    `json:"related_text"`
+	FrameworkTitle     string    `json:"framework_title"`
+	FrameworkEdition   string    `json:"framework_edition"`
+	FrameworkPublisher string    `json:"framework_publisher"`
+	FrameworkSourceURL string    `json:"framework_source_url"`
+	FrameworkLicense   string    `json:"framework_license"`
 }
 
 func (h *Handler) ListVerifiedAlignments(w http.ResponseWriter, r *http.Request) {
@@ -42,10 +49,15 @@ func (h *Handler) ListVerifiedAlignments(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	browse(h, w, r, pgx.RowToStructByName[verifiedAlignment], func(a verifiedAlignment) uuid.UUID { return a.ID },
-		`SELECT id, primary_objective_id, related_objective_id, relation, reviewed_at
-		FROM curriculum_verified_alignments
-		WHERE primary_objective_id = $3 AND ($1::uuid IS NULL OR id > $1)
-		ORDER BY id LIMIT $2`, []any{id})
+		`SELECT a.id, a.primary_objective_id, a.related_objective_id, a.relation, a.reviewed_at,
+			o.code AS related_code, o.objective_text AS related_text, f.title AS framework_title,
+			f.edition AS framework_edition, f.publisher AS framework_publisher,
+			f.source_url AS framework_source_url, f.license_note AS framework_license
+		FROM curriculum_verified_alignments a
+		JOIN curriculum_objectives o ON o.id = a.related_objective_id
+		JOIN curriculum_framework_versions f ON f.id = o.framework_version_id
+		WHERE a.primary_objective_id = $3 AND ($1::uuid IS NULL OR a.id > $1)
+		ORDER BY a.id LIMIT $2`, []any{id})
 }
 
 func (h *Handler) CreateAlignment(w http.ResponseWriter, r *http.Request) {

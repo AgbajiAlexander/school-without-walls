@@ -36,6 +36,27 @@ type Objective = {
   strand: string;
   code: string;
   objective_text: string;
+  framework_kind: string;
+};
+
+type Alignment = {
+  id: string;
+  relation: string;
+  reviewed_at: string;
+  related_code: string;
+  related_text: string;
+  framework_title: string;
+  framework_edition: string;
+  framework_publisher: string;
+  framework_source_url: string;
+  framework_license: string;
+};
+
+const relations: Record<string, string> = {
+  EQUIVALENT: "Equivalent",
+  COMPLEMENTARY: "Complementary",
+  EXTENDS: "Extends",
+  DIFFERENT: "Different",
 };
 
 type Page<T> = { items: T[]; next?: string };
@@ -80,6 +101,28 @@ function Frameworks({ page }: { page: Page<Framework> }) {
   );
 }
 
+function Alignments({ page }: { page: Page<Alignment> }) {
+  if (!page.items.length) return <p role="status">No verified enrichment alignments for this objective.</p>;
+  return (
+    <ul className="space-y-3">
+      {page.items.map((alignment) => {
+        const source = safeSource(alignment.framework_source_url);
+        return (
+          <li key={alignment.id} className="space-y-2 break-words rounded-xl border border-slate-200 bg-white p-4">
+            <p className="text-sm font-medium text-green-800">Optional enrichment ? {relations[alignment.relation]}</p>
+            <h2 className="font-semibold">{alignment.related_code}</h2>
+            <p>{alignment.related_text}</p>
+            <p className="text-sm">{alignment.framework_title} ? {alignment.framework_edition} ? {alignment.framework_publisher}</p>
+            <p className="text-sm">Reviewed {alignment.reviewed_at.slice(0, 10)}</p>
+            <p className="text-sm">{alignment.framework_license}</p>
+            {source && <a className="inline-block py-2 text-green-800 underline" href={source}>Publisher source</a>}
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 function Objectives({ version, stage, page }: { version: string; stage: string; page: Page<Objective> }) {
   return (
     <>
@@ -100,6 +143,12 @@ function Objectives({ version, stage, page }: { version: string; stage: string; 
               <h2 className="font-semibold">{objective.code}</h2>
               <p className="text-sm text-slate-700">{stages[objective.stage]} · {objective.grade_band} · {objective.subject} · {objective.strand}</p>
               <p className="break-words">{objective.objective_text}</p>
+              {objective.framework_kind === "NIGERIAN_PRIMARY" && (
+                <Link className="inline-block py-2 text-green-800 underline"
+                  href={url({ framework_version_id: version, stage, primary_objective_id: objective.id })}>
+                  Verified enrichment <span className="sr-only">for {objective.code}</span>
+                </Link>
+              )}
             </li>
           ))}
         </ul>
@@ -117,9 +166,12 @@ export default async function CurriculumPage({ searchParams }: {
   const version = typeof query.framework_version_id === "string" ? query.framework_version_id : "";
   const stage = typeof query.stage === "string" ? query.stage : "";
   const after = typeof query.after === "string" ? query.after : "";
-  const filters: Record<string, string> = version ? { framework_version_id: version, stage } : {};
-  const upstream = new URLSearchParams(after ? { ...filters, after } : filters);
-  const resource = version ? "objectives" : "frameworks";
+  const objective = typeof query.primary_objective_id === "string" ? query.primary_objective_id : "";
+  const editionFilters: Record<string, string> = version ? { framework_version_id: version, stage } : {};
+  const filters = objective ? { ...editionFilters, primary_objective_id: objective } : editionFilters;
+  const upstream = new URLSearchParams(objective ? { primary_objective_id: objective } : editionFilters);
+  if (after) upstream.set("after", after);
+  const resource = objective ? "alignments" : version ? "objectives" : "frameworks";
   const apiBase = process.env.API_INTERNAL_URL || "http://localhost:8080";
   const response = await fetch(new URL(`/api/v1/curriculum/${resource}?${upstream}`, apiBase), {
     headers: { Accept: "application/json", Cookie: cookie },
@@ -128,16 +180,18 @@ export default async function CurriculumPage({ searchParams }: {
   }).catch(() => null);
   if (response?.status === 401) redirect("/login");
   const envelope = response?.ok ? await response.json().catch(() => null) : null;
-  const page = Array.isArray(envelope?.data?.items) ? envelope.data as Page<Framework> | Page<Objective> : null;
+  const page = Array.isArray(envelope?.data?.items) ? envelope.data as Page<Framework> | Page<Objective> | Page<Alignment> : null;
   const next = typeof page?.next === "string" ? page.next : undefined;
 
   return (
     <main className="mx-auto w-full max-w-5xl space-y-5 px-4 py-8 sm:px-6">
       <Link href="/dashboard" className="text-green-800 underline">Back to My Schools</Link>
-      <h1 className="text-2xl font-semibold">{version ? "Curriculum objectives" : "Curriculum frameworks"}</h1>
-      {version && <Link href={root} className="inline-block py-2 text-green-800 underline">Back to frameworks</Link>}
+      <h1 className="text-2xl font-semibold">{objective ? "Verified enrichment alignments" : version ? "Curriculum objectives" : "Curriculum frameworks"}</h1>
+      {objective && version && <Link href={url(editionFilters)} className="inline-block py-2 text-green-800 underline">Back to objectives</Link>}
+      {(version || objective) && <Link href={root} className="inline-block py-2 text-green-800 underline">Back to frameworks</Link>}
       {page ? (
-        version ? <Objectives version={version} stage={stage} page={page as Page<Objective>} />
+        objective ? <Alignments page={page as Page<Alignment>} />
+          : version ? <Objectives version={version} stage={stage} page={page as Page<Objective>} />
           : <Frameworks page={page as Page<Framework>} />
       ) : (
         <p role="status">{response?.status === 403
