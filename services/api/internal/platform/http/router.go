@@ -10,6 +10,7 @@ import (
 	"github.com/school-without-walls/api/internal/config"
 	"github.com/school-without-walls/api/internal/modules/academics"
 	"github.com/school-without-walls/api/internal/modules/auth"
+	"github.com/school-without-walls/api/internal/modules/people"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
 	"github.com/school-without-walls/api/internal/platform/middleware"
@@ -36,6 +37,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	r := chi.NewRouter()
 
+	var peopleH *people.Handler
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
 	academicRepo := cfg.AcademicRepo
@@ -59,6 +61,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
 			offeringRepo = academics.NewSubjectOfferingRepository(dbWrapper.Pool)
 			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
+			peopleH = people.NewHandler(people.NewRepository(dbWrapper.Pool))
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
 		}
@@ -195,6 +198,24 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
 		})
 
+		if peopleH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff", peopleH.ListStaff)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/staff/candidates", peopleH.ListStaffCandidates)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/staff", peopleH.CreateStaff)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/staff/{staffID}", peopleH.UpdateStaff)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students", peopleH.ListStudents)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students", peopleH.CreateStudent)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students/{studentID}", peopleH.GetStudent)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}", peopleH.UpdateStudent)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/guardians", peopleH.ListGuardians)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/guardians", peopleH.CreateGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/guardians/{guardianID}", peopleH.UpdateGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}/guardians/{guardianID}", peopleH.LinkGuardian)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Delete("/tenants/{slug}/students/{studentID}/guardians/{guardianID}", peopleH.UnlinkGuardian)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students/{studentID}/enrollments", peopleH.ListEnrollments)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/enrollments", peopleH.CreateEnrollment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/students/{studentID}/enrollments/{enrollmentID}/transfers", peopleH.TransferEnrollment)
+		}
 		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions", academicH.ListSessions)
 		v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/academic-sessions", academicH.CreateSession)
 		v1.With(auth.RequireAuth).Get("/tenants/{slug}/academic-sessions/{sessionID}", academicH.GetSession)

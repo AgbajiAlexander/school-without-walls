@@ -107,6 +107,10 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 	if err := Up(ctx, pool); err != nil {
 		t.Fatalf("reapply migrations: %v", err)
 	}
+	t.Run("people_enrollment_constraints", func(t *testing.T) {
+		testPeopleEnrollmentConstraints(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)

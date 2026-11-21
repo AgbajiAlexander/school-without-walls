@@ -101,6 +101,12 @@ export default function MySchoolsPanel() {
                   >
                     Academic Management
                   </Link>
+                  <Link href={`${base}/students`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    Students
+                  </Link>
+                  <Link href={`${base}/staff`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800 hover:bg-slate-50">
+                    Staff profiles
+                  </Link>
 
                   <Link
                     href={`${base}/settings`}

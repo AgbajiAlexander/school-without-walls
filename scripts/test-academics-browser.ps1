@@ -8,15 +8,15 @@ $ErrorActionPreference='Stop'
 $root=Split-Path -Parent $PSScriptRoot
 $b=$PostgresBin
 $p=Join-Path ([IO.Path]::GetTempPath()) ('sww-academic-e2e-'+[guid]::NewGuid())
-if(Get-NetTCPConnection -LocalPort 15432,3000,3443,8080 -State Listen -ErrorAction SilentlyContinue){throw 'One of the isolated browser ports is occupied'}
+if(Get-NetTCPConnection -LocalPort 15435,13003,13443,18083 -State Listen -ErrorAction SilentlyContinue){throw 'One of the isolated browser ports is occupied'}
 & "$b/initdb.exe" -D $p -U sww_browser -A trust --no-locale --encoding=UTF8 | Out-Null
 if($LASTEXITCODE){throw 'initdb failed'}
-& "$b/pg_ctl.exe" -D $p -l "$p/server.log" -o '-p 15432 -h 127.0.0.1' -w start
+& "$b/pg_ctl.exe" -D $p -l "$p/server.log" -o '-p 15435 -h 127.0.0.1' -w start
 if($LASTEXITCODE){throw 'start failed'}
 try {
- & "$b/createdb.exe" -h 127.0.0.1 -p 15432 -U sww_browser sww_e2e_test
+ & "$b/createdb.exe" -h 127.0.0.1 -p 15435 -U sww_browser sww_e2e_test
  if($LASTEXITCODE){throw 'create failed'}
- $env:DATABASE_URL='postgres://sww_browser@127.0.0.1:15432/sww_e2e_test?sslmode=disable'
+ $env:DATABASE_URL='postgres://sww_browser@127.0.0.1:15435/sww_e2e_test?sslmode=disable'
  $env:SWW_TEST_DATABASE_URL=$env:DATABASE_URL
  $env:E2E_ADMIN_PASSWORD='A!a1'+[guid]::NewGuid().ToString('N')
  $env:BOOTSTRAP_ADMIN_PASSWORD=$env:E2E_ADMIN_PASSWORD
@@ -37,7 +37,9 @@ try {
  if($LASTEXITCODE){throw 'fictional identity setup failed'}
  Remove-Item Env:SWW_ENABLE_DEV_BOOTSTRAP,Env:BOOTSTRAP_ADMIN_PASSWORD -ErrorAction SilentlyContinue
  $env:SERVER_ENV='staging'
- $env:SERVER_PORT='8080'
+ $env:E2E_API_PORT='18083'
+ $env:E2E_WEB_PORT='13003'
+ $env:E2E_HTTPS_PORT='13443'
  Remove-Item Env:SMTP_HOST,Env:SMTP_PORT,Env:SMTP_USERNAME,Env:SMTP_PASSWORD,Env:SMTP_FROM -ErrorAction SilentlyContinue
  @'
 INSERT INTO users (email, password_hash, full_name, status, verified_at)
@@ -50,15 +52,41 @@ INSERT INTO memberships (id, tenant_id, user_id, role)
 SELECT gen_random_uuid(), t.id, u.id, CASE WHEN u.email = 'academic-owner@example.test' THEN 'SCHOOL_OWNER' ELSE 'TEACHER' END
 FROM tenants t CROSS JOIN users u
 WHERE t.slug = 'academic-fixture-a' AND u.email IN ('academic-owner@example.test','academic-teacher@example.test');
-'@ | & "$b/psql.exe" -h 127.0.0.1 -p 15432 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
+
+DO $$
+DECLARE
+    school UUID := (SELECT id FROM tenants WHERE slug = 'academic-fixture-a');
+    session UUID := gen_random_uuid();
+    grade_a UUID := gen_random_uuid();
+    grade_b UUID := gen_random_uuid();
+    class_a UUID := gen_random_uuid();
+BEGIN
+    INSERT INTO academic_sessions (id, tenant_id, name, starts_on, ends_on)
+    VALUES (session, school, 'Enrollment fixture session', '2034-09-01', '2035-07-31');
+    INSERT INTO academic_terms (id, tenant_id, session_id, sequence, name, starts_on, ends_on) VALUES
+    (gen_random_uuid(), school, session, 1, 'Fixture First Term', '2034-09-01', '2034-12-15'),
+    (gen_random_uuid(), school, session, 2, 'Fixture Second Term', '2035-01-06', '2035-03-31'),
+    (gen_random_uuid(), school, session, 3, 'Fixture Third Term', '2035-04-01', '2035-07-31');
+    UPDATE academic_sessions SET status = 'ACTIVE' WHERE id = session;
+    INSERT INTO grade_levels (id, tenant_id, stage, code, name, sort_order) VALUES
+    (grade_a, school, 'PRIMARY', 'FIXA', 'Fictional grade A', 1),
+    (grade_b, school, 'PRIMARY', 'FIXB', 'Fictional grade B', 2);
+    INSERT INTO classes (id, tenant_id, session_id, grade_level_id, code, name) VALUES
+    (class_a, school, session, grade_a, 'FIXA', 'Fixture Class A'),
+    (gen_random_uuid(), school, session, grade_b, 'FIXB', 'Fixture Class B');
+    INSERT INTO class_arms (id, tenant_id, class_id, code, name)
+    VALUES (gen_random_uuid(), school, class_a, 'A', 'Fixture Arm A');
+END
+$$;
+'@ | & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
  if($LASTEXITCODE){throw 'fixture setup failed'}
  Set-Location "$root/apps/web"
- $env:API_INTERNAL_URL='http://127.0.0.1:8080'
+ $env:API_INTERNAL_URL='http://127.0.0.1:18083'
  npm.cmd run build
  if($LASTEXITCODE){throw 'build failed'}
  npm.cmd exec -- playwright test --config playwright.academics.config.ts --output "$p/playwright"
  if($LASTEXITCODE){throw 'browser acceptance failed'}
- $counts = & "$b/psql.exe" -h 127.0.0.1 -p 15432 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FILTER (WHERE t.slug = 'academic-fixture-a' AND s.name = '2030/2031 fixture'), count(*) FILTER (WHERE t.slug = 'academic-fixture-b' OR s.name = 'Denied fixture') FROM academic_sessions s JOIN tenants t ON t.id = s.tenant_id;"
+ $counts = & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1 -At -c "SELECT count(*) FILTER (WHERE t.slug = 'academic-fixture-a' AND s.name = '2030/2031 fixture'), count(*) FILTER (WHERE t.slug = 'academic-fixture-b' OR s.name = 'Denied fixture') FROM academic_sessions s JOIN tenants t ON t.id = s.tenant_id;"
  if($LASTEXITCODE -or $counts -ne '1|0'){throw 'Unexpected persisted academic rows'}
  'Verified one authorized session and zero denied or cross-school rows'
 } finally {

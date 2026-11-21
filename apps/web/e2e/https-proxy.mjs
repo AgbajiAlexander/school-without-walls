@@ -14,7 +14,7 @@ const server = createServer({
 }, (incoming, outgoing) => {
   const upstream = request({
     hostname: "127.0.0.1",
-    port: 3000,
+    port: Number(process.env.E2E_WEB_PORT ?? 3000),
     method: incoming.method,
     path: incoming.url,
     headers: {
@@ -37,4 +37,4 @@ const server = createServer({
   incoming.pipe(upstream);
 });
 
-server.listen(3443, "127.0.0.1");
+server.listen(Number(process.env.E2E_HTTPS_PORT ?? 3443), "127.0.0.1");

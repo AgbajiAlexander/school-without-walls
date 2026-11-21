@@ -96,3 +96,78 @@ Commands may be adjusted to actual generated directory and package scripts; do n
 - The Windows runner creates a new disposable PostgreSQL cluster and the exact guarded database `sww_e2e_test`, migrates it, and seeds two fictional schools. It runs the Edge acceptance spec and stops the cluster. No change to `sww_dev`, production schema, or application code. The Go test server retains its existing all-interface bind on port 8080. Run the fixture on a trusted development machine.
 - Reproduce after installing the frontend dependencies with `powershell.exe -NoProfile -File .\scripts\test-academics-browser.ps1`. Git for Windows OpenSSL, local PostgreSQL and Microsoft Edge are required. The runner accepts `-PostgresBin` and `-OpenSSL` for alternative installed paths.
 - Cloud provisioning and paid integrations are paused by owner direction. Keep deployment commit 403ee85 and PR #9 isolated. SWW-005 starts from FR-PEO-001, FR-PEO-002, FR-ACA-003 and FR-ID-004. Keep people records separate from permission grants, use tenant-aware relationships, require one active section per student/term, and test immediate guardian unlink and cross-school denial. Coordinate migration numbering with PR #9, which already owns 000008.
+
+### SWW-005 — student, guardian, and enrollment schema slice
+
+- Local branch `feature/SWW-005-people-enrollment` starts at accepted academics commit `3681ed7`. FR-PEO-001 and FR-ACA-003 storage is implemented in migration `000009_people_enrollment`. The existing Staff Invitation branch retains ownership of `000008`.
+- Students and guardians can be recorded before receiving login access. Any linked identity must have the matching tenant role. Composite foreign keys constrain guardian relationships, academic year, class and arm. A partial unique index permits one active enrollment per student and term, while ended rows remain available for history.
+- Mandatory PostgreSQL migration tests passed on a disposable loopback database, including duplicate admission numbers, wrong-role identity links, cross-school guardian links, incompatible enrollment scope, active enrollment uniqueness and retained history. Full Go regression, vet and build passed. No migration ran against `sww_dev`.
+- SWW-005 remains open. The next application slice must enforce role and relationship checks in Go, lock and audit guardian link changes, implement atomic enrollment transfers, and provide the frontend journeys. No student or guardian data route is enabled by this migration. Verify the combined migration sequence with the Staff Invitation line before integration.
+
+### SWW-005 — student summary and guardian revocation
+
+- `GET /api/v1/tenants/{slug}/students/{studentID}` returns only the student ID, display name, and education stage. It requires a session and active tenant and user state. School managers can read the tenant summary. A student can read their own active record, and a parent can read an active record only while their active guardian relationship exists. Other requests receive a generic not-found response.
+- `DELETE /api/v1/tenants/{slug}/students/{studentID}/guardians/{guardianID}` is a CSRF-protected soft unlink for active owners, school admins, and principals. It locks tenant, actor, and authority membership in that order. Unlink and its redacted audit event commit together. Each read rechecks the link, so a read started after commit is denied for a parent with no remaining authorized relationship.
+- Student and guardian create/list/update, staff records, enrollment transfers, and frontend workflows remain outstanding. No migration was run against `sww_dev`.
+
+### SWW-005 — atomic enrollment transfer
+
+- `POST /api/v1/tenants/{slug}/students/{studentID}/enrollments/{enrollmentID}/transfers` accepts `class_id` and optional `class_arm_id`. The path identifies the expected current placement. A stale or unchanged placement returns 409. Missing or inaccessible records return 404.
+- Go checks the active school and manager membership, locks the active student and academic session, and verifies the destination belongs to the same session. The existing placement ends at the same instant as the replacement begins in the same term. The audit event and both changes commit together. The original row remains available for enrollment history.
+- The transfer endpoint does not create initial enrollments. Student and guardian management, staff records, enrollment creation and history views, and frontend journeys remain outstanding.
+
+### SWW-005 — initial enrollment and history
+
+- `POST /api/v1/tenants/{slug}/students/{studentID}/enrollments` takes `term_id`, `class_id`, and an optional `class_arm_id`. An active school manager with a valid session and CSRF token may place an active student in an active class within the term's active session. Creation and its redacted audit event commit together. Duplicate active placement returns 409.
+- `GET /api/v1/tenants/{slug}/students/{studentID}/enrollments` is manager-only and sends `Cache-Control: no-store`. It returns active and ended placements with timestamps, up to 50 per page. Supply the returned `next_cursor` as `before` to retrieve older placements for that same student.
+- Student and guardian management, staff records, enrollment frontend workflows, and browser acceptance remain outstanding.
+
+### SWW-005 — student registration and profile management
+
+- Active school owners, school administrators, and principals use `GET /api/v1/tenants/{slug}/students` for a tenant-scoped list of up to 50 records and `next_cursor` as the next request's `after` parameter. Registration uses `POST` on the same collection and replacement of editable fields uses `PUT /students/{studentID}` within the tenant path. Writes require CSRF and audit the record ID without profile values. A duplicate admission number returns 409.
+- Registration captures admission number, display name, and education stage. This slice does not collect optional birth dates or grant account access. The student and guardian summary remains relationship-scoped and excludes admission numbers. Guardian and staff management and frontend acceptance remain outstanding.
+
+### SWW-005 — guardian profiles and relationships
+
+- Active school owners, school administrators, and principals can create and list guardian profiles via `POST` and `GET /api/v1/tenants/{slug}/guardians` and edit them via `PUT /guardians/{guardianID}` under the tenant path. Lists are uncached and paginated. Optional `student_id` restricts the list to active links for that student. Contact details are manager-only.
+- `PUT /api/v1/tenants/{slug}/students/{studentID}/guardians/{guardianID}` saves the relationship label and activates the link. The existing `DELETE` soft-unlinks. Writes require CSRF and audit changes in the same transaction. Saving an identical active link does not write another audit event. Profile and link writes do not create identities or memberships.
+- Staff records, student and guardian account onboarding, and frontend acceptance remain outstanding.
+
+### SWW-005 — staff profiles
+
+- `GET /api/v1/tenants/{slug}/staff` lists staff profiles for active school owners, school administrators, and principals. It returns up to 50 records with an optional `next_cursor` for the `after` query parameter. The response is uncached.
+- `POST` on that collection records `membership_id`, `display_name`, and `staff_code` for an existing active staff membership in the same school. `PUT /staff/{staffID}` under the tenant path changes display name and staff code only. Writes require CSRF and commit with redacted audit events.
+- Migration `000009_people_enrollment` adds staff profiles with tenant-aware membership references and one profile per school and user. Staff code is case-insensitively unique per school. Staff profile changes do not grant, update, or reactivate membership. Invitations remain a separate workflow.
+- Student and guardian account onboarding, staff membership selection in the UI, people management screens, and browser acceptance remain outstanding.
+
+### SWW-005 — staff membership selection and dashboard
+
+- `GET /api/v1/tenants/{slug}/staff/candidates` lists active staff memberships without a profile, one candidate per user. It is manager-only, tenant-scoped, uncached and paginated using `after`. The response includes the existing account email so managers can distinguish staff with the same display name, but exposes no credentials or separate contact details.
+- `/schools/{slug}/staff` loads staff profiles and candidates through authenticated Go endpoints before showing the form. It creates and edits staff profiles with CSRF protection and no membership changes. The existing disposable Edge runner now exercises the staff workflow as well as academics.
+- Student and guardian onboarding and the remaining people and enrollment dashboard journeys are still open.
+
+The local staff and academics browser runner uses PostgreSQL 15435, Next.js 13003, HTTPS proxy 13443, and Go API 18083. The hosted authentication/CSP workflow retains its existing default ports.
+
+The staff and academic Edge journeys passed against production Next.js, the real Go API and disposable PostgreSQL. The owner selected a staff account, created and edited its profile, and saw the saved staff code after reload. The teacher and a school outside the owner's membership received the denial UI. The candidate disappeared after profile creation. The full Go regression with mandatory PostgreSQL, Go vet and build, 165 frontend tests, TypeScript, lint and production build passed.
+
+### SWW-005 — student dashboard
+
+- My Schools links to `/schools/{slug}/students`. The page loads the current session and the manager-only student list from Go before rendering any records or edit controls. The list uses the existing API cursor for navigation.
+- Registration and editing use same-origin requests and the current session CSRF token. The form defaults to Primary, with the other approved stages available. Admission number conflicts and access failures produce safe messages. Student registration does not create an account or collect a birth date.
+- Guardian and enrollment dashboard controls and student and guardian account onboarding remain pending.
+
+The three Edge journeys passed against production Next.js, the Go API, and fresh disposable PostgreSQL. The owner registered and edited a student through My Schools and verified the saved education stage after reload. Teacher and cross-school views disclosed neither student data nor edit controls. All 168 frontend tests, TypeScript, lint, production build and diff checks passed.
+
+### SWW-005 — guardian dashboard
+
+- The Students page links to the manager-only guardian directory and to each student's relationship view. Managers can register and edit guardians, save a relationship, or confirm unlinking. Directory and relationship lists use independent cursors. The page loads the relevant Go responses before rendering profiles or controls.
+- Confirmed unlinking removes the active relationship while retaining the guardian profile. Link changes use same-origin CSRF-protected calls. Guardian account invitation and identity binding remain separate work, along with the enrollment dashboard.
+
+All four Edge journeys passed against production Next.js, the real Go API and disposable PostgreSQL. The guardian journey verified registration, editing, a link after reload, unlinking without deleting the profile, and cross-school denial without exposure of contact details. The 168 frontend tests, TypeScript, lint and production build passed.
+
+### SWW-005 — enrollment dashboard
+
+- Each student row links to a manager-only enrollment page. It lists active and ended placements with academic names and timestamps. The first enrollment form uses terms and classes from the active session. Class arms are loaded for the selected class. Transfers operate on the displayed active placement and retain the same term. History is cursor-paginated.
+- The page uses the existing Go authorization, CSRF, transaction, and audit controls. Initial placements and transfers refresh history after success. A stale transfer or duplicate enrollment shows a conflict and refreshes history. Student and guardian account onboarding remains open.
+
+All five Edge journeys passed against production Next.js, Go, and disposable PostgreSQL. The enrollment journey selected an active term, class and arm, transferred to a second class, and verified one ended and one active placement after reload. A cross-school route showed no placement details. Mandatory PostgreSQL Go tests, Go vet and build, 168 frontend tests, TypeScript, lint, production build, and diff whitespace checks passed.
