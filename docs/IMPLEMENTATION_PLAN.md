@@ -303,3 +303,11 @@ Alignment review, tenant edition selection, and rights-reviewed content remain o
 Migration 000012 implements the FR-CUR-004 storage and verification boundary. Nigerian objectives can link to enrichment objectives through one of the four declared relations. Mappings start as drafts. Review requires a reviewer identity and two published editions, stamps the review time in PostgreSQL, and preserves the approved mapping as history. The verified view omits drafts and hides a mapping when either edition is withdrawn while retaining its review record.
 
 The PostgreSQL test covered invalid direction and relation, duplicate links, review before publication, missing reviewer, edits during review, visibility after review, immutability, and withdrawal. The database records reviewer identity. Reviewer authorization, audited review actions, verified catalog display, and tenant edition selection remain to be implemented in the application.
+
+### SWW-006 alignment review API
+
+Active platform administrators create a draft with POST /api/v1/curriculum/alignments and explicitly approve it with POST /api/v1/curriculum/alignments/{alignmentID}/review. Global catalog changes require the existing global grant. School roles do not authorize global publication. Both writes require an authenticated session and CSRF validation. The approval uses the authenticated actor, and each successful write records a global audit event in the same transaction.
+
+Active school members can read verified links through GET /api/v1/curriculum/alignments with primary_objective_id and optional after cursor. The result includes the review date and omits the internal reviewer identifier. The PostgreSQL HTTP regression verified draft invisibility, forbidden school-role writes, CSRF, reviewer-field rejection, duplicate and premature approvals, audit counts, grant removal, and suppression after withdrawal.
+
+The review UI and verified alignment display, tenant edition selection, and rights-reviewed content remain open.
