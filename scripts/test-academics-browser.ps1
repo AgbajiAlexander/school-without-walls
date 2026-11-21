@@ -137,6 +137,8 @@ BEGIN
     INSERT INTO memberships (id,tenant_id,user_id,role) VALUES
     (teacher_membership,school_id,teacher_id,'TEACHER'),
     (gen_random_uuid(),school_id,learner_id,'STUDENT');
+    INSERT INTO memberships (id,tenant_id,user_id,role)
+    SELECT gen_random_uuid(),school_id,id,'SCHOOL_ADMIN' FROM users WHERE email='academic-reviewer@example.test';
     INSERT INTO academic_sessions (id,tenant_id,name,starts_on,ends_on)
     VALUES(session_id_value,school_id,'Classroom fixture',CURRENT_DATE-20,CURRENT_DATE+160);
     INSERT INTO academic_terms (id,tenant_id,session_id,sequence,name,starts_on,ends_on) VALUES

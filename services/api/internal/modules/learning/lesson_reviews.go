@@ -95,3 +95,49 @@ func (h *Handler) ApproveLesson(w http.ResponseWriter, r *http.Request) {
 	}
 	response.JSON(w, r, http.StatusOK, map[string]any{"id": id, "review_status": "APPROVED"})
 }
+
+func (h *Handler) SetLessonReviewPolicy(w http.ResponseWriter, r *http.Request) {
+	actor, ok := teachingActor(w, r)
+	if !ok {
+		return
+	}
+	var input struct {
+		Required *bool `json:"required"`
+	}
+	if !decodeLesson(w, r, &input) || input.Required == nil {
+		invalidLesson(w, r)
+		return
+	}
+	ctx := r.Context()
+	tx, err := h.pool.Begin(ctx)
+	if err != nil {
+		teacherLessonError(w, r, err)
+		return
+	}
+	defer tx.Rollback(ctx)
+	var tenant uuid.UUID
+	err = tx.QueryRow(ctx, `SELECT t.id FROM tenants t
+		JOIN memberships m ON m.tenant_id=t.id AND m.user_id=$2 AND m.status='ACTIVE' AND m.role IN ('SCHOOL_OWNER','SCHOOL_ADMIN')
+		JOIN users u ON u.id=m.user_id AND u.status='ACTIVE'
+		WHERE t.slug=$1::citext AND t.status='ACTIVE'
+		ORDER BY m.id LIMIT 1 FOR UPDATE OF t FOR SHARE OF u,m`, chi.URLParam(r, "slug"), actor).Scan(&tenant)
+	if err != nil {
+		teacherLessonError(w, r, err)
+		return
+	}
+	_, err = tx.Exec(ctx, `UPDATE tenants SET feature_flags=jsonb_set(feature_flags,'{lesson_review_required}',to_jsonb($2::boolean)),
+		updated_at=clock_timestamp() WHERE id=$1`, tenant, *input.Required)
+	if err == nil {
+		_, err = tx.Exec(ctx, `INSERT INTO audit_events (id,tenant_id,actor_id,action,subject_type,subject_id,request_id,metadata_redacted)
+			VALUES ($1,$2,$3,'learning.lesson_review.policy','tenant',$4,$5,jsonb_build_object('required',$6::boolean))`,
+			uuid.New(), tenant, actor, tenant.String(), middleware.GetRequestID(ctx), *input.Required)
+	}
+	if err == nil {
+		err = tx.Commit(ctx)
+	}
+	if err != nil {
+		teacherLessonError(w, r, err)
+		return
+	}
+	response.JSON(w, r, http.StatusOK, map[string]bool{"required": *input.Required})
+}

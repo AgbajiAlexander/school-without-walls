@@ -23,10 +23,9 @@ func teacherLessonReview(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 			t.Fatal(err)
 		}
 	}
-	run(`UPDATE tenants SET feature_flags='{"lesson_review_required":true}' WHERE id=$1`, school)
 	run(`INSERT INTO users (id,email,password_hash,full_name,status)
 	VALUES ($1,'lesson-reviewer@example.test','unused','Fictional reviewer','ACTIVE')`, reviewer)
-	run(`INSERT INTO memberships (id,tenant_id,user_id,role) VALUES ($1,$3,$4,'PRINCIPAL'),($2,$3,$5,'PRINCIPAL')`,
+	run(`INSERT INTO memberships (id,tenant_id,user_id,role) VALUES ($1,$3,$4,'SCHOOL_ADMIN'),($2,$3,$5,'PRINCIPAL')`,
 		uuid.New(), uuid.New(), school, reviewer, actor)
 	run(`INSERT INTO sessions (user_id,token_hash,csrf_token_hash,ip_address,user_agent,expires_at)
 	VALUES ($1,$2,$3,'127.0.0.1','Fixture',clock_timestamp()+interval '1 hour')`, reviewer, auth.HashToken(reviewerToken), auth.HashToken(csrf))
@@ -43,6 +42,10 @@ func teacherLessonReview(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		return rec.Body.String()
 	}
 	const base = "/api/v1/tenants/lesson-fixture-a"
+	policy := base + "/lesson-review-policy"
+	hit("PUT", policy, teacher, csrf, `{"required":true}`, 404)
+	hit("PUT", policy, reviewerToken, "", `{"required":true}`, 403)
+	hit("PUT", policy, reviewerToken, csrf, `{"required":true}`, 200)
 	var result struct{ Data struct{ ID uuid.UUID } }
 	out := hit("POST", base+"/teaching/lessons", teacher, csrf, payload, 201)
 	if err := json.Unmarshal([]byte(out), &result); err != nil || result.Data.ID == uuid.Nil {

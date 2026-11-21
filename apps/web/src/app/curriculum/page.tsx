@@ -89,9 +89,9 @@ function Frameworks({ page }: { page: Page<Framework> }) {
             <p>Effective from {edition.effective_from}{edition.effective_to ? ` to ${edition.effective_to}` : ""}</p>
             <p className="break-words text-sm">{edition.license_note}</p>
             <div className="flex flex-wrap gap-4">
-              <Link className="py-2 text-green-800 underline" href={url({ framework_version_id: edition.id })}>
+              <a className="py-2 text-green-800 underline" href={url({ framework_version_id: edition.id })}>
                 Browse objectives <span className="sr-only">for {edition.title}, {edition.edition}</span>
-              </Link>
+              </a>
               {source && <a className="py-2 text-green-800 underline" href={source}>Publisher source</a>}
             </div>
           </li>
@@ -144,10 +144,10 @@ function Objectives({ version, stage, page }: { version: string; stage: string; 
               <p className="text-sm text-slate-700">{stages[objective.stage]} · {objective.grade_band} · {objective.subject} · {objective.strand}</p>
               <p className="break-words">{objective.objective_text}</p>
               {objective.framework_kind === "NIGERIAN_PRIMARY" && (
-                <Link className="inline-block py-2 text-green-800 underline"
+                <a className="inline-block py-2 text-green-800 underline"
                   href={url({ framework_version_id: version, stage, primary_objective_id: objective.id })}>
                   Verified enrichment <span className="sr-only">for {objective.code}</span>
-                </Link>
+                </a>
               )}
             </li>
           ))}

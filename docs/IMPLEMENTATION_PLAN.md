@@ -393,3 +393,7 @@ The seven Edge journeys passed with the real API and disposable PostgreSQL. The 
 Migration 000015 supports optional lesson review through the tenant's lesson_review_required feature flag. Assigned teachers submit their current draft revision. Active school managers may inspect submitted text and approve the exact revision, with self-approval excluded. PostgreSQL blocks publication without current approval when the flag is enabled. Editing title or content advances the revision and invalidates earlier approval. Submission and approval are audited.
 
 The PostgreSQL HTTP regression covered ordinary publication with the flag off, gated publication, current review queue visibility, self-approval and cross-school denial, CSRF, and approval invalidation after an edit. The controlled school setting and browser review workflow remain open, together with lesson enrichment and private media.
+
+### SWW-007 lesson review browser workflow
+
+School Owners and School Administrators can change the audited publication policy. Principals can review submitted content without changing the policy. Authors can submit the saved revision, see its review status, and publish after approval. The Edge journey exercised school policy activation, separate reviewer approval, publication, and the enrolled student's view. The final run passed all seven Edge journeys. The PostgreSQL-required Go suite, vet, build, 189 frontend tests, TypeScript, lint, and production build passed. Enrichment and private media remain open.

@@ -93,6 +93,7 @@ func (m *MockRepository) GetForMember(_ context.Context, slug string, userID uui
 	result.CanManageAcademics = mockCanManageAcademics(role)
 	result.CanReadLessons = role == "STUDENT"
 	result.CanTeachLessons = role == "TEACHER"
+	result.CanManageLessonReview = role == "SCHOOL_OWNER" || role == "SCHOOL_ADMIN"
 	return result, nil
 }
 
@@ -119,6 +120,7 @@ func (m *MockRepository) UpdateSettings(_ context.Context, slug string, userID u
 	result.CanManageAcademics = mockCanManageAcademics(role)
 	result.CanReadLessons = role == "STUDENT"
 	result.CanTeachLessons = role == "TEACHER"
+	result.CanManageLessonReview = role == "SCHOOL_OWNER" || role == "SCHOOL_ADMIN"
 	return result, nil
 }
 

@@ -18,7 +18,17 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const publishedPath = new URL(page.url()).pathname;
   const teacherContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
+  const reviewerContext = await browser.newContext({ baseURL, ignoreHTTPSErrors: true });
   try {
+    const reviewer = await reviewerContext.newPage();
+    await reviewer.goto("/login");
+    await reviewer.getByLabel("Email Address").fill("academic-reviewer@example.test");
+    await reviewer.getByLabel("Password", { exact: true }).fill(password);
+    await reviewer.getByRole("button", { name: "Sign in" }).click();
+    await reviewer.getByRole("article").filter({ hasText: "Fictional Classroom School" })
+      .getByRole("link", { name: "Lesson reviews" }).click();
+    await reviewer.getByRole("button", { name: "Require lesson approval" }).click();
+    await expect(reviewer.getByText("Approval is required before publication.")).toBeVisible();
     const teacher = await teacherContext.newPage();
     await teacher.goto("/login");
     await teacher.getByLabel("Email Address").fill("academic-teacher@example.test");
@@ -40,6 +50,17 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
 
     await page.goto("/schools/classroom-fixture/learning");
     await expect(page.getByRole("link", { name: "Teacher-created counting exercise" })).toHaveCount(0);
+    await expect(teacher.getByRole("button", { name: "Publish lesson" })).toHaveCount(0);
+    await teacher.getByRole("button", { name: "Submit for review" }).click();
+    await expect(teacher.getByText("Awaiting approval.")).toBeVisible();
+    await reviewer.reload();
+    const review = reviewer.getByRole("article").filter({ hasText: "Teacher-created counting exercise" });
+    await expect(review.getByText("Count the five practice counters.")).toBeVisible();
+    await review.getByRole("button", { name: "Review lesson" }).click();
+    await review.getByRole("button", { name: "Confirm approval" }).click();
+    await expect(reviewer.getByText("Lesson revision approved.")).toBeVisible();
+    await teacher.reload();
+    await expect(teacher.getByText("Current revision approved.")).toBeVisible();
     await teacher.getByRole("button", { name: "Publish lesson" }).click();
     await teacher.getByRole("button", { name: "Confirm publication" }).click();
     await expect(teacher.getByText("Lesson published.", { exact: true })).toBeVisible();
@@ -52,6 +73,7 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     await expect(page.getByText("Count the five practice counters.")).toHaveCount(0);
   } finally {
     await teacherContext.close();
+    await reviewerContext.close();
   }
   await page.goto(publishedPath.replace("classroom-fixture", "academic-fixture-b"));
   await expect(page.getByRole("heading", { name: "Lesson unavailable" })).toBeVisible();

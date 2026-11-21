@@ -25,12 +25,14 @@ type teachingObjective struct {
 }
 
 type teacherLessonRecord struct {
-	ID            uuid.UUID `json:"id"`
-	OfferingID    uuid.UUID `json:"offering_id"`
-	Title         string    `json:"title"`
-	Status        string    `json:"status"`
-	Content       *string   `json:"content,omitempty"`
-	ObjectiveCode string    `json:"objective_code"`
+	ID             uuid.UUID `json:"id"`
+	OfferingID     uuid.UUID `json:"offering_id"`
+	Title          string    `json:"title"`
+	Status         string    `json:"status"`
+	Content        *string   `json:"content,omitempty"`
+	ObjectiveCode  string    `json:"objective_code"`
+	ReviewRequired bool      `json:"review_required"`
+	ReviewStatus   string    `json:"review_status"`
 }
 
 func (h *Handler) ListTeachingOfferings(w http.ResponseWriter, r *http.Request) {
@@ -67,12 +69,16 @@ func (h *Handler) ListTeachingObjectives(w http.ResponseWriter, r *http.Request)
 const ownedLessonJoin = teacherOfferingJoins + `
 	JOIN lessons l ON l.tenant_id=o.tenant_id AND l.offering_id=o.id AND l.author_membership_id=m.id
 	JOIN curriculum_objectives p ON p.id=l.primary_objective_id
+	LEFT JOIN lesson_reviews review ON review.tenant_id=l.tenant_id AND review.lesson_id=l.id AND review.lesson_revision=l.content_revision
 	WHERE t.slug=$1::citext AND t.status='ACTIVE'
 `
 
 func (h *Handler) ListTeacherLessons(w http.ResponseWriter, r *http.Request) {
 	teacherPage(h, w, r, pgx.RowToStructByName[teacherLessonRecord], func(l teacherLessonRecord) uuid.UUID { return l.ID },
-		`SELECT l.id,l.offering_id,l.title,l.status,NULL::text AS content,p.code AS objective_code`+ownedLessonJoin+
+		`SELECT l.id,l.offering_id,l.title,l.status,NULL::text AS content,p.code AS objective_code,
+		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
+		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status`+ownedLessonJoin+
 			`AND ($3::uuid IS NULL OR l.id>$3) ORDER BY l.id LIMIT 51`)
 }
 
@@ -86,7 +92,10 @@ func (h *Handler) GetTeacherLesson(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := h.pool.Query(r.Context(), `
-		SELECT l.id,l.offering_id,l.title,l.status,l.content,p.code AS objective_code`+ownedLessonJoin+`AND l.id=$3`,
+		SELECT l.id,l.offering_id,l.title,l.status,l.content,p.code AS objective_code,
+		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
+		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status`+ownedLessonJoin+`AND l.id=$3`,
 		chi.URLParam(r, "slug"), actor, id)
 	if err != nil {
 		lessonReadError(w, r, err)

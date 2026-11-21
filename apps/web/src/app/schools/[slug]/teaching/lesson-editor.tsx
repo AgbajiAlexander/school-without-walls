@@ -6,7 +6,7 @@ import { useRef, useState, type FormEvent } from "react";
 export default function LessonEditor({ endpoint, root, csrf, offering, objectives, lesson }: {
   endpoint: string; root: string; csrf: string; offering?: string;
   objectives?: { id: string; code: string; objective_text: string }[];
-  lesson?: { id: string; title: string; status: string; content?: string; objective_code: string };
+  lesson?: { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string };
 }) {
   const router = useRouter();
   const [title, setTitle] = useState(lesson?.title ?? "");
@@ -23,7 +23,7 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
   const inFlight = useRef(false);
   const url = lesson ? `${endpoint}/${encodeURIComponent(lesson.id)}` : endpoint;
 
-  async function write(action: "save" | "publish" | "archive") {
+  async function write(action: "save" | "publish" | "archive" | "submit") {
     if (blocked || waitingForState || inFlight.current) return;
     inFlight.current = true;
     setBusy(true);
@@ -46,8 +46,8 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
         router.refresh();
       } else if (result.status === 200) {
         setConfirmation(undefined);
-        setNotice(action === "publish" ? "Lesson published." : action === "archive" ? "Lesson archived." : "Draft saved.");
-        if (action !== "save") setPreviousStatus(lesson?.status);
+        setNotice(action === "publish" ? "Lesson published." : action === "archive" ? "Lesson archived." : action === "submit" ? "Submitted for review." : "Draft saved.");
+        if (action === "publish" || action === "archive") setPreviousStatus(lesson?.status);
         router.refresh();
       } else if ([401, 403, 404, 409].includes(result.status)) {
         setBlocked(true);
@@ -82,7 +82,16 @@ export default function LessonEditor({ endpoint, root, csrf, offering, objective
           <button type="submit" className="min-h-11 rounded bg-green-800 px-3 text-white">{busy ? "Savingâ€¦" : lesson ? "Save changes" : "Save lesson draft"}</button>
         </fieldset>
       </form> : <div className="whitespace-pre-wrap break-words">{lesson.content}</div>}
-      {lesson && lesson.status !== "ARCHIVED" && !blocked && !waitingForState && (
+      {lesson?.status === "DRAFT" && lesson.review_required && (
+        <div className="space-y-2">
+          {lesson.review_status === "PENDING" ? <p>Awaiting approval.</p>
+            : lesson.review_status === "APPROVED" ? <p>Current revision approved.</p>
+              : <button type="button" disabled={busy || blocked || unsubmitted} className="min-h-11 text-green-800 underline"
+                onClick={() => void write("submit")}>Submit for review</button>}
+        </div>
+      )}
+      {lesson && lesson.status !== "ARCHIVED" && !blocked && !waitingForState &&
+        (lesson.status !== "DRAFT" || !lesson.review_required || lesson.review_status === "APPROVED") && (
         confirmation ? <div className="flex flex-wrap items-center gap-3">
           <p>{confirmation === "publish" ? "Publish this lesson for enrolled students?" : "Remove this lesson from student reading?"}</p>
           <button type="button" disabled={busy} onClick={() => void write(confirmation)} className="min-h-11 rounded bg-green-800 px-3 text-white">

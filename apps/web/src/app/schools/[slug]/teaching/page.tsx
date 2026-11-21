@@ -6,7 +6,7 @@ import LessonEditor from "./lesson-editor";
 type Page<T> = { items: T[]; next?: string };
 type Offering = { id: string; subject: string; class_name: string; arm_name?: string; term_name: string };
 type Objective = { id: string; code: string; objective_text: string };
-type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string };
+type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string };
 
 export default async function TeachingPage({ params, searchParams }: {
   params: Promise<{ slug: string }>;

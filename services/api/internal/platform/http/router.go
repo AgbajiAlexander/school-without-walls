@@ -233,6 +233,7 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/submit", learningH.SubmitTeacherLesson)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/lesson-reviews/{lessonID}/approve", learningH.ApproveLesson)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/lesson-reviews", learningH.ListLessonReviews)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/lesson-review-policy", learningH.SetLessonReviewPolicy)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/archive", learningH.ArchiveTeacherLesson)
 		}
 
