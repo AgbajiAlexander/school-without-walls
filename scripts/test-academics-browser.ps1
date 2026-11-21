@@ -112,6 +112,58 @@ WHERE p.code = 'FIX.COUNT' AND r.code IN ('FIX.EXTEND', 'FIX.DRAFT');
 UPDATE curriculum_objective_alignments a SET review_status = 'HUMAN_REVIEWED', reviewer_id = u.id
 FROM curriculum_objectives r CROSS JOIN users u
 WHERE a.related_objective_id = r.id AND r.code = 'FIX.EXTEND' AND u.email = 'academic-owner@example.test';
+
+DO $$
+DECLARE
+    school_id UUID := gen_random_uuid();
+    session_id_value UUID := gen_random_uuid();
+    term_id_value UUID := gen_random_uuid();
+    grade_id UUID := gen_random_uuid();
+    class_id_value UUID := gen_random_uuid();
+    subject_id_value UUID := gen_random_uuid();
+    offering_id_value UUID := gen_random_uuid();
+    teacher_id UUID := (SELECT id FROM users WHERE email='academic-teacher@example.test');
+    teacher_membership UUID := gen_random_uuid();
+    learner_id UUID := gen_random_uuid();
+    student_id_value UUID := gen_random_uuid();
+    selection_id UUID := gen_random_uuid();
+    framework_id UUID := '82c5c04e-9009-443e-829a-ac8443248780';
+    objective_id UUID := (SELECT id FROM curriculum_objectives WHERE framework_version_id=framework_id AND code='FIX.COUNT');
+BEGIN
+    INSERT INTO tenants (id,slug,name,status) VALUES(school_id,'classroom-fixture','Fictional Classroom School','ACTIVE');
+    INSERT INTO users (id,email,password_hash,full_name,status,verified_at)
+    SELECT learner_id,'academic-learner@example.test',password_hash,'Fictional Learner','ACTIVE',clock_timestamp()
+    FROM users WHERE id=teacher_id;
+    INSERT INTO memberships (id,tenant_id,user_id,role) VALUES
+    (teacher_membership,school_id,teacher_id,'TEACHER'),
+    (gen_random_uuid(),school_id,learner_id,'STUDENT');
+    INSERT INTO academic_sessions (id,tenant_id,name,starts_on,ends_on)
+    VALUES(session_id_value,school_id,'Classroom fixture',CURRENT_DATE-20,CURRENT_DATE+160);
+    INSERT INTO academic_terms (id,tenant_id,session_id,sequence,name,starts_on,ends_on) VALUES
+    (term_id_value,school_id,session_id_value,1,'Classroom First Term',CURRENT_DATE-20,CURRENT_DATE+20),
+    (gen_random_uuid(),school_id,session_id_value,2,'Classroom Second Term',CURRENT_DATE+21,CURRENT_DATE+80),
+    (gen_random_uuid(),school_id,session_id_value,3,'Classroom Third Term',CURRENT_DATE+81,CURRENT_DATE+160);
+    UPDATE academic_sessions SET status='ACTIVE' WHERE id=session_id_value;
+    INSERT INTO grade_levels (id,tenant_id,stage,code,name,sort_order) VALUES (grade_id,school_id,'PRIMARY','ROOM','Fictional grade',1);
+    INSERT INTO classes (id,tenant_id,session_id,grade_level_id,code,name) VALUES
+    (class_id_value,school_id,session_id_value,grade_id,'ROOM','Fictional classroom');
+    INSERT INTO subjects (id,tenant_id,code,name) VALUES(subject_id_value,school_id,'COUNT','Fictional number work');
+    INSERT INTO subject_offerings (id,tenant_id,subject_id,term_id,class_id) VALUES
+    (offering_id_value,school_id,subject_id_value,term_id_value,class_id_value);
+    INSERT INTO teacher_assignments (id,tenant_id,offering_id,teacher_membership_id) VALUES
+    (gen_random_uuid(),school_id,offering_id_value,teacher_membership);
+    INSERT INTO school_curriculum_selections (id,tenant_id,session_id,stage,curriculum_role,revision,framework_version_id,selected_by)
+    VALUES(selection_id,school_id,session_id_value,'PRIMARY','PRIMARY',1,framework_id,teacher_id);
+    INSERT INTO students (id,tenant_id,user_id,admission_no,display_name,stage) VALUES
+    (student_id_value,school_id,learner_id,'ROOM-1','Fictional Learner','PRIMARY');
+    INSERT INTO enrollments (id,tenant_id,student_id,session_id,term_id,class_id) VALUES
+    (gen_random_uuid(),school_id,student_id_value,session_id_value,term_id_value,class_id_value);
+    INSERT INTO lessons (id,tenant_id,offering_id,author_membership_id,curriculum_selection_id,primary_objective_id,title,content) VALUES
+    ('13d0ffdf-aae1-4b72-b64c-6828436e94f1',school_id,offering_id_value,teacher_membership,selection_id,objective_id,'Count the classroom objects','Read the example, then count <strong>three</strong> objects.'),
+    ('13d0ffdf-aae1-4b72-b64c-6828436e94f2',school_id,offering_id_value,teacher_membership,selection_id,objective_id,'Unpublished classroom draft','Draft text.');
+    UPDATE lessons SET status='PUBLISHED' WHERE id='13d0ffdf-aae1-4b72-b64c-6828436e94f1';
+END
+$$;
 '@ | & "$b/psql.exe" -h 127.0.0.1 -p 15435 -U sww_browser -d sww_e2e_test -v ON_ERROR_STOP=1
  if($LASTEXITCODE){throw 'fixture setup failed'}
  Set-Location "$root/apps/web"

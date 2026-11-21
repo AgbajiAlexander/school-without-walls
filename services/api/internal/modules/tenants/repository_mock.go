@@ -91,6 +91,7 @@ func (m *MockRepository) GetForMember(_ context.Context, slug string, userID uui
 	result.CurrentRole = role
 	result.CanInviteStaff = role == "SCHOOL_OWNER"
 	result.CanManageAcademics = mockCanManageAcademics(role)
+	result.CanReadLessons = role == "STUDENT"
 	return result, nil
 }
 
@@ -115,6 +116,7 @@ func (m *MockRepository) UpdateSettings(_ context.Context, slug string, userID u
 	result.CurrentRole = role
 	result.CanInviteStaff = role == "SCHOOL_OWNER"
 	result.CanManageAcademics = mockCanManageAcademics(role)
+	result.CanReadLessons = role == "STUDENT"
 	return result, nil
 }
 

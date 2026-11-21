@@ -31,6 +31,7 @@ type Tenant struct {
 	CurrentRole        string          `json:"current_role,omitempty"`
 	CanInviteStaff     bool            `json:"can_invite_staff"`
 	CanManageAcademics bool            `json:"can_manage_academics"`
+	CanReadLessons     bool            `json:"can_read_lessons"`
 }
 
 type ProvisionRequest struct {

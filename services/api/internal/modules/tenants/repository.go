@@ -141,7 +141,7 @@ const memberSchoolQuery = `
 	SELECT t.id, t.slug::text, t.name, t.status::text, t.locale, t.timezone,
 		t.branding, t.feature_flags, t.education_stages, t.created_at, t.updated_at,
 		MIN(m.role), BOOL_OR(m.role = 'SCHOOL_OWNER'),
-		BOOL_OR(m.role IN ('SCHOOL_OWNER', 'SCHOOL_ADMIN', 'PRINCIPAL'))
+		BOOL_OR(m.role IN ('SCHOOL_OWNER', 'SCHOOL_ADMIN', 'PRINCIPAL')), BOOL_OR(m.role = 'STUDENT')
 	FROM tenants t
 	JOIN memberships m ON m.tenant_id = t.id
 	JOIN users u ON u.id = m.user_id
@@ -229,7 +229,7 @@ func scanTenantWithRole(row rowScanner) (*Tenant, error) {
 	err := row.Scan(
 		&tenant.ID, &tenant.Slug, &tenant.Name, &tenant.Status, &tenant.Locale,
 		&tenant.Timezone, &branding, &flags, &tenant.EducationStages,
-		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole, &tenant.CanInviteStaff, &tenant.CanManageAcademics,
+		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole, &tenant.CanInviteStaff, &tenant.CanManageAcademics, &tenant.CanReadLessons,
 	)
 	if err != nil {
 		return nil, err

@@ -136,6 +136,11 @@ export default function MySchoolsPanel() {
                   >
                     School Settings
                   </Link>
+                  {school.can_read_lessons === true && (
+                    <Link href={`${base}/learning`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                      Lessons
+                    </Link>
+                  )}
                   {canInviteStaff(school) && (
                     <Link
                       href={`${base}/settings#invite-staff`}

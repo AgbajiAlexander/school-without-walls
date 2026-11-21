@@ -16,6 +16,7 @@ export interface Tenant {
   current_role?: string;
   can_invite_staff?: boolean;
   can_manage_academics?: boolean;
+  can_read_lessons?: boolean;
 }
 
 export interface ProvisionTenantRequest {
