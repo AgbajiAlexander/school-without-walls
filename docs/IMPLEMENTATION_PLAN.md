@@ -327,3 +327,11 @@ Platform administrators can inspect paginated drafts from the platform dashboard
 PostgreSQL HTTP coverage verified operator-only queue access, removal after approval, and denial after grant revocation. The full Go suite with PostgreSQL required, vet, build, 189 frontend tests, TypeScript, lint, and the production build passed. The six Edge journeys passed against the real API and disposable PostgreSQL. A school member was denied draft access, a separate operator approved the draft through the confirmation UI, and the member then saw the verified mapping.
 
 School-session edition selection and rights-reviewed content remain open.
+
+### SWW-006 school-session curriculum selection storage
+
+Migration 000013 implements the FR-CUR-005 storage foundation. Each school, session, stage, and curriculum role has an append-only selection history. Replacing an edition creates a new revision. The original selection ID and framework version remain available for future lesson or report references. The latest choice remains explicit after its edition is withdrawn, and consumers must check the edition status before assigning new content.
+
+Selections require a same-school session and a published edition with an objective in the selected stage. The role distinguishes Nigerian primary curriculum and optional enrichment. A published developmental framework may serve as primary for Early Years. Archived sessions retain their selections and reject new revisions.
+
+The disposable PostgreSQL test covered cross-school rejection, edition eligibility, one sequential history per slot, optional enrichment and developmental selections, immutable history, withdrawal, and archived-session rejection. The school manager API, dashboard selection and downstream historical lesson/report integration remain open.
