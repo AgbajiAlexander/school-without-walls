@@ -11,11 +11,17 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/school-without-walls/api/internal/modules/auth"
+	"github.com/school-without-walls/api/internal/platform/media"
 	"github.com/school-without-walls/api/internal/platform/middleware"
 	"github.com/school-without-walls/api/internal/platform/response"
 )
 
-type Handler struct{ pool *pgxpool.Pool }
+type Handler struct {
+	pool         *pgxpool.Pool
+	mediaStore   *media.Store
+	mediaScanner media.Scanner
+	scanSlots    chan struct{}
+}
 
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{pool: pool} }
 
@@ -45,7 +51,9 @@ const lessonEnrichmentDetails = `(
 const studentLessonQuery = `
 	SELECT l.id,l.title,subject.name AS subject,objective.code AS objective_code,l.published_at,
 		CASE WHEN $3::uuid IS NOT NULL THEN l.content END AS content,
-		CASE WHEN $3::uuid IS NOT NULL THEN ` + lessonEnrichmentDetails + ` END AS enrichment
+		CASE WHEN $3::uuid IS NOT NULL THEN ` + lessonEnrichmentDetails + ` END AS enrichment` + studentLessonScope + ` ORDER BY l.id LIMIT 51`
+
+const studentLessonScope = `
 	FROM tenants t JOIN users u ON u.id=$2 AND u.status='ACTIVE'
 	JOIN memberships m ON m.tenant_id=t.id AND m.user_id=u.id AND m.role='STUDENT' AND m.status='ACTIVE'
 	JOIN students s ON s.tenant_id=t.id AND s.user_id=u.id AND s.status='ACTIVE'
@@ -65,7 +73,6 @@ const studentLessonQuery = `
 	  AND (statement_timestamp() AT TIME ZONE t.timezone)::date BETWEEN term.starts_on AND term.ends_on
 	  AND l.published_at <= statement_timestamp()
 	  AND ($3::uuid IS NULL OR l.id=$3) AND ($4::uuid IS NULL OR l.id>$4)
-	ORDER BY l.id LIMIT 51
 `
 
 func (h *Handler) ListStudentLessons(w http.ResponseWriter, r *http.Request) {

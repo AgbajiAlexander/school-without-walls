@@ -15,6 +15,7 @@ import (
 	"github.com/school-without-walls/api/internal/modules/people"
 	"github.com/school-without-walls/api/internal/modules/tenants"
 	"github.com/school-without-walls/api/internal/platform/db"
+	"github.com/school-without-walls/api/internal/platform/media"
 	"github.com/school-without-walls/api/internal/platform/middleware"
 )
 
@@ -67,6 +68,14 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
 			peopleH = people.NewHandler(people.NewRepository(dbWrapper.Pool))
 			learningH = learning.NewHandler(dbWrapper.Pool)
+			if cfg.Config.LessonMedia != nil {
+				m := cfg.Config.LessonMedia
+				store, err := media.NewStore(media.StoreConfig{Endpoint: m.Endpoint, Bucket: m.Bucket, Region: m.Region, AccessKey: m.AccessKey, SecretKey: m.SecretKey})
+				if err != nil {
+					return nil, fmt.Errorf("invalid private lesson media configuration")
+				}
+				learningH.ConfigureMedia(store, media.ClamScanner{Network: m.ScannerNetwork, Address: m.ScannerAddress})
+			}
 			curriculumH = curriculum.NewHandler(dbWrapper.Pool)
 		} else {
 			return nil, fmt.Errorf("authoritative PostgreSQL database is required")
@@ -221,6 +230,11 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		})
 
 		if learningH != nil {
+			if cfg.Config.LessonMedia != nil {
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media", learningH.UploadLessonMedia)
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media/{mediaID}/complete", learningH.CompleteLessonMedia)
+				v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}/media", learningH.DownloadLessonMedia)
+			}
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons", learningH.ListStudentLessons)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}", learningH.GetStudentLesson)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings", learningH.ListTeachingOfferings)
