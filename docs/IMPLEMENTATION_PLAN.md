@@ -17,7 +17,7 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-004B | Levels, classes and arms | School-configurable levels/classes with tenant-aware constraints and access tests | 004A |
 | SWW-004C | Subjects, offerings and teacher assignments | Same-tenant active teacher assignments; tenant constraints and access tests | 004B |
 | [x] SWW-004D | Responsive academic management workflow | Server-verified school context; accessible lifecycle states; real API E2E passes | 004A, 004B, 004C |
-| SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004D |
+| [x] SWW-005 | Students, guardians, staff and enrollment | Linked guardian sees only own child; unlink revokes; audit events | 004D |
 | SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004C |
 | SWW-007 | Teacher lessons + student reading | Published lesson available to enrolled learner only; responsive text-first UI | 005,006 |
 | SWW-008 | Assignment/submission/feedback/progress | Student submission, teacher feedback, score constraints, access tests | 007 |
@@ -275,3 +275,11 @@ The PostgreSQL HTTP regression covers authorization, CSRF, cross-school profile 
 Student and guardian account invitations are available from the respective profile lists. Edge verified both account journeys using the real Go API, disposable loopback PostgreSQL, and local mail capture. The test confirmed accepted account roles after fresh sign-in, access to the intended student record, denial of the manager directory, replay rejection, and immediate guardian access revocation after unlinking. The existing staff invitation browser journey also passed in the same run. The 189 frontend tests, TypeScript, lint, and the production build passed.
 
 SWW-005 local acceptance is complete. The migration and API rollout order above still applies before hosted exposure.
+
+### SWW-006 curriculum registry schema
+
+Migration 000011 adds a global framework edition registry and objectives indexed by stable edition-specific codes. Frameworks record publisher, jurisdiction, effective dates, source, and license metadata. Nigerian primary frameworks, developmental frameworks, and optional enrichment are distinguished by kind. Objective rows store the stage, grade band, subject, and strand for browsing and indexing.
+
+Published metadata and objectives are retained, including after an edition is withdrawn. Editors create a new edition for revisions. The PostgreSQL regression verified coexisting editions, edition-scoped objective codes, Nigerian jurisdiction validation, and retention of a withdrawn edition's original objective. The fixture uses fictional text and does not confer curriculum rights or approval.
+
+SWW-006 remains open. The published registry API, alignment review, tenant edition selection, and rights-reviewed content acceptance are pending.

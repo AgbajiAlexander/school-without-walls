@@ -119,6 +119,10 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 		testProfileInvitationIssuance(t, ctx, pool)
 	})
 
+	t.Run("curriculum_registry", func(t *testing.T) {
+		testCurriculumRegistry(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)
