@@ -397,3 +397,9 @@ The PostgreSQL HTTP regression covered ordinary publication with the flag off, g
 ### SWW-007 lesson review browser workflow
 
 School Owners and School Administrators can change the audited publication policy. Principals can review submitted content without changing the policy. Authors can submit the saved revision, see its review status, and publish after approval. The Edge journey exercised school policy activation, separate reviewer approval, publication, and the enrolled student's view. The final run passed all seven Edge journeys. The PostgreSQL-required Go suite, vet, build, 189 frontend tests, TypeScript, lint, and production build passed. Enrichment and private media remain open.
+
+### SWW-007 lesson enrichment write gate
+
+Migration 000016 and the teacher lesson write API accept up to ten distinct verified enrichment mappings. Each must reference the pinned primary objective, match its stage, and use the school's currently selected published enrichment edition. The database rechecks eligibility at publication. Changing the mapping list advances the lesson's review revision, and a published lesson retains its original mappings.
+
+The PostgreSQL regression covers unreviewed and duplicate mappings, a mapping for the wrong primary objective, a revised draft, immutable published mappings, and withdrawal before publication. Teacher option discovery and selection controls and the student display remain open, along with private media.

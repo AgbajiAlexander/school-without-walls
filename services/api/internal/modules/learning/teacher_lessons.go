@@ -18,10 +18,11 @@ import (
 )
 
 type lessonDraft struct {
-	OfferingID  uuid.UUID `json:"offering_id"`
-	ObjectiveID uuid.UUID `json:"primary_objective_id"`
-	Title       string    `json:"title"`
-	Content     string    `json:"content"`
+	OfferingID    uuid.UUID   `json:"offering_id"`
+	ObjectiveID   uuid.UUID   `json:"primary_objective_id"`
+	EnrichmentIDs []uuid.UUID `json:"enrichment_alignment_ids"`
+	Title         string      `json:"title"`
+	Content       string      `json:"content"`
 }
 
 var errLessonConflict = errors.New("lesson state changed")
@@ -66,7 +67,7 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 	var draft lessonDraft
 	var id uuid.UUID
 	if action == "create" {
-		if !decodeLesson(w, r, &draft) || draft.OfferingID == uuid.Nil || draft.ObjectiveID == uuid.Nil || !validLessonText(&draft.Title, &draft.Content) {
+		if !decodeLesson(w, r, &draft) || draft.OfferingID == uuid.Nil || draft.ObjectiveID == uuid.Nil || !validEnrichment(draft.EnrichmentIDs) || !validLessonText(&draft.Title, &draft.Content) {
 			invalidLesson(w, r)
 			return
 		}
@@ -80,14 +81,18 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 		}
 		if action == "edit" {
 			var text struct {
-				Title   string `json:"title"`
-				Content string `json:"content"`
+				Title         string       `json:"title"`
+				Content       string       `json:"content"`
+				EnrichmentIDs *[]uuid.UUID `json:"enrichment_alignment_ids"`
 			}
-			if !decodeLesson(w, r, &text) || !validLessonText(&text.Title, &text.Content) {
+			if !decodeLesson(w, r, &text) || !validLessonText(&text.Title, &text.Content) || (text.EnrichmentIDs != nil && !validEnrichment(*text.EnrichmentIDs)) {
 				invalidLesson(w, r)
 				return
 			}
 			draft.Title, draft.Content = text.Title, text.Content
+			if text.EnrichmentIDs != nil {
+				draft.EnrichmentIDs = *text.EnrichmentIDs
+			}
 		}
 	}
 	ctx := r.Context()
@@ -120,8 +125,8 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 	switch action {
 	case "create":
 		tag, insertErr := tx.Exec(ctx, `
-   INSERT INTO lessons (id,tenant_id,offering_id,author_membership_id,curriculum_selection_id,primary_objective_id,title,content)
-   SELECT $1,o.tenant_id,o.id,$4,s.id,p.id,$6,$7
+   INSERT INTO lessons (id,tenant_id,offering_id,author_membership_id,curriculum_selection_id,primary_objective_id,title,content,enrichment_alignment_ids)
+   SELECT $1,o.tenant_id,o.id,$4,s.id,p.id,$6,$7,COALESCE($8::uuid[],ARRAY[]::uuid[])
    FROM subject_offerings o
    JOIN academic_terms term ON term.tenant_id=o.tenant_id AND term.id=o.term_id
    JOIN classes c ON c.tenant_id=o.tenant_id AND c.session_id=term.session_id AND c.id=o.class_id
@@ -130,7 +135,7 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
     AND s.stage=g.stage AND s.curriculum_role='PRIMARY'
    JOIN curriculum_objectives p ON p.id=$5 AND p.framework_version_id=s.framework_version_id AND p.stage=s.stage
    WHERE o.tenant_id=$2 AND o.id=$3
-  `, id, tenant, draft.OfferingID, membership, draft.ObjectiveID, draft.Title, draft.Content)
+  `, id, tenant, draft.OfferingID, membership, draft.ObjectiveID, draft.Title, draft.Content, draft.EnrichmentIDs)
 		err = insertErr
 		if err == nil && tag.RowsAffected() != 1 {
 			invalidLesson(w, r)
@@ -147,7 +152,7 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 		}
 		switch {
 		case action == "edit" && before == "DRAFT":
-			_, err = tx.Exec(ctx, `UPDATE lessons SET title=$3,content=$4 WHERE tenant_id=$1 AND id=$2`, tenant, id, draft.Title, draft.Content)
+			_, err = tx.Exec(ctx, `UPDATE lessons SET title=$3,content=$4,enrichment_alignment_ids=COALESCE($5::uuid[],enrichment_alignment_ids) WHERE tenant_id=$1 AND id=$2`, tenant, id, draft.Title, draft.Content, draft.EnrichmentIDs)
 			status = "DRAFT"
 		case action == "submit" && before == "DRAFT":
 			var tag pgconn.CommandTag
@@ -191,6 +196,20 @@ func decodeLesson(w http.ResponseWriter, r *http.Request, dst any) bool {
 	decoder.DisallowUnknownFields()
 	return decoder.Decode(dst) == nil && errors.Is(decoder.Decode(new(any)), io.EOF)
 }
+func validEnrichment(ids []uuid.UUID) bool {
+	if len(ids) > 10 {
+		return false
+	}
+	seen := make(map[uuid.UUID]bool, len(ids))
+	for _, id := range ids {
+		if id == uuid.Nil || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
+
 func validLessonText(title, content *string) bool {
 	*title = strings.TrimSpace(*title)
 	*content = strings.TrimSpace(*content)

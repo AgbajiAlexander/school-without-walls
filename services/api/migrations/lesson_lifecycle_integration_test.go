@@ -73,6 +73,37 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		t.Fatal("publication must retain the original edition selection")
 	}
 	testStudentLessonHTTP(t, ctx, pool, school, session, term, class, lesson, pending)
+	english, extra, alignment := uuid.New(), uuid.New(), uuid.New()
+	run("", `INSERT INTO curriculum_framework_versions
+		(id,jurisdiction,publisher,title,edition,framework_kind,effective_from,source_url,license_note)
+		VALUES ($1,'GB-ENG','Lesson Fixture','Fictional enrichment','one','ENRICHMENT','2030-01-01','https://example.test/extra','Fixture only')`, english)
+	run("", `INSERT INTO curriculum_objectives (id,framework_version_id,stage,grade_band,subject,strand,code,objective_text)
+		VALUES ($1,$2,'PRIMARY','Year 1','Mathematics','Number','EXTRA.1','Fictional enrichment objective')`, extra, english)
+	run("", `UPDATE curriculum_framework_versions SET status='PUBLISHED' WHERE id=$1`, english)
+	run("", `INSERT INTO school_curriculum_selections
+		(id,tenant_id,session_id,stage,curriculum_role,revision,framework_version_id,selected_by)
+		VALUES ($1,$2,$3,'PRIMARY','ENRICHMENT',1,$4,$5)`, uuid.New(), school, session, english, user)
+	run("", `INSERT INTO curriculum_objective_alignments (id,primary_objective_id,related_objective_id,relation)
+		VALUES ($1,$2,$3,'COMPLEMENTARY')`, alignment, secondObjective, extra)
+	enriched := uuid.New()
+	run("", create, enriched, school, offering, membership, replacement, secondObjective)
+	const attach = `UPDATE lessons SET enrichment_alignment_ids=$2 WHERE id=$1`
+	run("23514", attach, enriched, []uuid.UUID{alignment})
+	run("", `UPDATE curriculum_objective_alignments SET review_status='HUMAN_REVIEWED',reviewer_id=$2 WHERE id=$1`, alignment, user)
+	run("23514", attach, enriched, []uuid.UUID{alignment, alignment})
+	run("23514", attach, pending, []uuid.UUID{alignment})
+	run("", attach, enriched, []uuid.UUID{alignment})
+	var revision int
+	if err := pool.QueryRow(ctx, `SELECT content_revision FROM lessons WHERE id=$1`, enriched).Scan(&revision); err != nil || revision != 2 {
+		t.Fatal("enrichment must advance the lesson content revision")
+	}
+	run("", publish, enriched)
+	run("23514", attach, enriched, []uuid.UUID{})
+	stale := uuid.New()
+	run("", create, stale, school, offering, membership, replacement, secondObjective)
+	run("", attach, stale, []uuid.UUID{alignment})
+	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, english)
+	run("23514", publish, stale)
 	testTeacherLessonHTTP(t, ctx, pool, school, user, membership, offering, secondObjective, firstObjective)
 	run("23514", `UPDATE lessons SET content='changed' WHERE id=$1`, lesson)
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, first)
