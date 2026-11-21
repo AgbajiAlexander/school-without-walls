@@ -127,6 +127,10 @@ func TestMigrationRunnerLedgerAndFailureRollback(t *testing.T) {
 		testCurriculumCatalogHTTP(t, ctx, pool)
 	})
 
+	t.Run("curriculum_alignment_review", func(t *testing.T) {
+		testCurriculumAlignmentReview(t, ctx, pool)
+	})
+
 	statuses, err := ReadStatus(ctx, pool)
 	if err != nil {
 		t.Fatalf("read migration status: %v", err)

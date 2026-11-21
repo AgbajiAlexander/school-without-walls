@@ -297,3 +297,9 @@ My Schools links active members to the published curriculum catalog. The page di
 All 189 frontend tests, TypeScript, lint, and the Next.js build passed. All six Edge journeys passed against the real Go API and disposable PostgreSQL. The curriculum journey verified anonymous redirect, visible provenance, separate enrichment labeling, draft exclusion, filtering, an empty result, and no horizontal overflow at 360 pixels.
 
 Alignment review, tenant edition selection, and rights-reviewed content remain open.
+
+### SWW-006 alignment storage and review gate
+
+Migration 000012 implements the FR-CUR-004 storage and verification boundary. Nigerian objectives can link to enrichment objectives through one of the four declared relations. Mappings start as drafts. Review requires a reviewer identity and two published editions, stamps the review time in PostgreSQL, and preserves the approved mapping as history. The verified view omits drafts and hides a mapping when either edition is withdrawn while retaining its review record.
+
+The PostgreSQL test covered invalid direction and relation, duplicate links, review before publication, missing reviewer, edits during review, visibility after review, immutability, and withdrawal. The database records reviewer identity. Reviewer authorization, audited review actions, verified catalog display, and tenant edition selection remain to be implemented in the application.
