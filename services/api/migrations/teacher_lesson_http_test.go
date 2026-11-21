@@ -86,6 +86,7 @@ func testTeacherLessonHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	send("PATCH", detail, csrf, `{"title":"Changed","content":"Changed"}`, 409)
 	send("POST", detail+"/publish", csrf, "", 409)
 	send("POST", detail+"/archive", csrf, "", 200)
+	teacherLessonReview(t, ctx, pool, router, school, actor, token, csrf, payload(objective))
 	var audits int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE tenant_id=$1 AND actor_id=$2 AND subject_type='lesson' AND subject_id=$3`, school, actor, result.Data.ID.String()).Scan(&audits); err != nil || audits != 4 {
 		t.Fatal("expected exactly one audit per successful mutation")

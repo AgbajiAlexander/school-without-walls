@@ -387,3 +387,9 @@ The focused PostgreSQL HTTP regression verified assignment-scoped offering disco
 My Schools links teachers and students to their teaching and lesson pages using independent server-derived capabilities. An assigned teacher can choose an eligible primary objective, create and edit a draft, and explicitly confirm publication or archival. Enrolled students can read published text with the existing server permission checks.
 
 The seven Edge journeys passed with the real API and disposable PostgreSQL. The lesson journey verified draft invisibility, teacher publication, enrolled-student reading on a 360-pixel screen, student denial on the teacher route, draft and cross-school direct-link denial, and literal display of HTML-like lesson text. The required PostgreSQL Go suite, vet and build, 189 frontend tests, TypeScript, lint and production build passed. Optional review, enrichment selection and private media remain open.
+
+### SWW-007 revision-bound lesson approval API
+
+Migration 000015 supports optional lesson review through the tenant's lesson_review_required feature flag. Assigned teachers submit their current draft revision. Active school managers may inspect submitted text and approve the exact revision, with self-approval excluded. PostgreSQL blocks publication without current approval when the flag is enabled. Editing title or content advances the revision and invalidates earlier approval. Submission and approval are audited.
+
+The PostgreSQL HTTP regression covered ordinary publication with the flag off, gated publication, current review queue visibility, self-approval and cross-school denial, CSRF, and approval invalidation after an edit. The controlled school setting and browser review workflow remain open, together with lesson enrichment and private media.

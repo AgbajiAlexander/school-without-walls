@@ -45,6 +45,10 @@ func (h *Handler) CreateTeacherLesson(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateTeacherLesson(w http.ResponseWriter, r *http.Request) {
 	h.writeTeacherLesson(w, r, "edit")
 }
+func (h *Handler) SubmitTeacherLesson(w http.ResponseWriter, r *http.Request) {
+	h.writeTeacherLesson(w, r, "submit")
+}
+
 func (h *Handler) PublishTeacherLesson(w http.ResponseWriter, r *http.Request) {
 	h.writeTeacherLesson(w, r, "publish")
 }
@@ -135,7 +139,8 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 		status = "DRAFT"
 	default:
 		var before string
-		err = tx.QueryRow(ctx, `SELECT status FROM lessons WHERE tenant_id=$1 AND id=$2 AND author_membership_id=$3 FOR UPDATE`, tenant, id, membership).Scan(&before)
+		var revision int64
+		err = tx.QueryRow(ctx, `SELECT status,content_revision FROM lessons WHERE tenant_id=$1 AND id=$2 AND author_membership_id=$3 FOR UPDATE`, tenant, id, membership).Scan(&before, &revision)
 		if err != nil {
 			teacherLessonError(w, r, err)
 			return
@@ -144,6 +149,14 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 		case action == "edit" && before == "DRAFT":
 			_, err = tx.Exec(ctx, `UPDATE lessons SET title=$3,content=$4 WHERE tenant_id=$1 AND id=$2`, tenant, id, draft.Title, draft.Content)
 			status = "DRAFT"
+		case action == "submit" && before == "DRAFT":
+			var tag pgconn.CommandTag
+			tag, err = tx.Exec(ctx, `INSERT INTO lesson_reviews (tenant_id,lesson_id,lesson_revision)
+				VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, tenant, id, revision)
+			if err == nil && tag.RowsAffected() == 0 {
+				err = errLessonConflict
+			}
+			status = "DRAFT"
 		case action == "publish" && before == "DRAFT":
 			status = "PUBLISHED"
 		case action == "archive" && before == "PUBLISHED":
@@ -151,7 +164,7 @@ func (h *Handler) writeTeacherLesson(w http.ResponseWriter, r *http.Request, act
 		default:
 			err = errLessonConflict
 		}
-		if err == nil && action != "edit" {
+		if err == nil && (action == "publish" || action == "archive") {
 			_, err = tx.Exec(ctx, `UPDATE lessons SET status=$3 WHERE tenant_id=$1 AND id=$2`, tenant, id, status)
 		}
 	}
