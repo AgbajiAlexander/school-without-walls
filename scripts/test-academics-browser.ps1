@@ -156,6 +156,9 @@ BEGIN
     (gen_random_uuid(),school_id,offering_id_value,teacher_membership);
     INSERT INTO school_curriculum_selections (id,tenant_id,session_id,stage,curriculum_role,revision,framework_version_id,selected_by)
     VALUES(selection_id,school_id,session_id_value,'PRIMARY','PRIMARY',1,framework_id,teacher_id);
+    INSERT INTO school_curriculum_selections (id,tenant_id,session_id,stage,curriculum_role,revision,framework_version_id,selected_by)
+    SELECT gen_random_uuid(),school_id,session_id_value,'PRIMARY','ENRICHMENT',1,id,teacher_id
+    FROM curriculum_framework_versions WHERE title='Fictional British Framework';
     INSERT INTO students (id,tenant_id,user_id,admission_no,display_name,stage) VALUES
     (student_id_value,school_id,learner_id,'ROOM-1','Fictional Learner','PRIMARY');
     INSERT INTO enrollments (id,tenant_id,student_id,session_id,term_id,class_id) VALUES

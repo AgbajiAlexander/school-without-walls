@@ -403,3 +403,7 @@ School Owners and School Administrators can change the audited publication polic
 Migration 000016 and the teacher lesson write API accept up to ten distinct verified enrichment mappings. Each must reference the pinned primary objective, match its stage, and use the school's currently selected published enrichment edition. The database rechecks eligibility at publication. Changing the mapping list advances the lesson's review revision, and a published lesson retains its original mappings.
 
 The PostgreSQL regression covers unreviewed and duplicate mappings, a mapping for the wrong primary objective, a revised draft, immutable published mappings, and withdrawal before publication. Teacher option discovery and selection controls and the student display remain open, along with private media.
+
+### SWW-007 enrichment browser workflow
+
+Teachers can select verified optional enrichment for the primary objective, and existing selections that lose eligibility are flagged in the draft editor. Reviewers see the submitted mappings and learners see the pinned mappings on published lessons, with withdrawn editions identified. The Edge journey selected enrichment in the draft, verified it in the reviewer queue, and confirmed it on the enrolled learner page after publication. All seven browser journeys, the PostgreSQL-required Go suite, vet, build, 189 frontend tests, TypeScript, lint and the production build passed. Private media remains open.

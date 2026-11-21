@@ -43,6 +43,7 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     const objective = await choice.getAttribute("value");
     if (!objective) throw new Error("Expected a curriculum objective identifier");
     await selector.selectOption(objective);
+    await teacher.getByRole("checkbox", { name: /FIX.EXTEND/ }).check();
     await teacher.getByLabel("Lesson title").fill("Teacher-created counting exercise");
     await teacher.getByLabel("Lesson text").fill("Count the five practice counters.");
     await teacher.getByRole("button", { name: "Save lesson draft" }).click();
@@ -56,6 +57,7 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     await reviewer.reload();
     const review = reviewer.getByRole("article").filter({ hasText: "Teacher-created counting exercise" });
     await expect(review.getByText("Count the five practice counters.")).toBeVisible();
+    await expect(review.getByText(/Group fictional objects in pairs/)).toBeVisible();
     await review.getByRole("button", { name: "Review lesson" }).click();
     await review.getByRole("button", { name: "Confirm approval" }).click();
     await expect(reviewer.getByText("Lesson revision approved.")).toBeVisible();
@@ -67,6 +69,8 @@ test("an enrolled student reads a published text lesson on mobile", async ({ pag
     await page.reload();
     await page.getByRole("link", { name: "Teacher-created counting exercise" }).click();
     await expect(page.getByText("Count the five practice counters.")).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Optional enrichment" })).toBeVisible();
+    await expect(page.getByText(/Group fictional objects in pairs/)).toBeVisible();
 
     await page.goto(new URL(teacher.url()).pathname + new URL(teacher.url()).search);
     await expect(page.getByText("Teaching lesson unavailable.")).toBeVisible();

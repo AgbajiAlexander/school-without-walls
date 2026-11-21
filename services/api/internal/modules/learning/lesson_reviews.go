@@ -18,15 +18,16 @@ const lessonReviewerScope = `
 `
 
 type pendingLessonReview struct {
-	ID       uuid.UUID `json:"id"`
-	Title    string    `json:"title"`
-	Content  string    `json:"content"`
-	Revision int64     `json:"revision"`
+	ID         uuid.UUID          `json:"id"`
+	Title      string             `json:"title"`
+	Content    string             `json:"content"`
+	Revision   int64              `json:"revision"`
+	Enrichment []lessonEnrichment `json:"enrichment,omitempty"`
 }
 
 func (h *Handler) ListLessonReviews(w http.ResponseWriter, r *http.Request) {
 	teacherPage(h, w, r, pgx.RowToStructByName[pendingLessonReview], func(item pendingLessonReview) uuid.UUID { return item.ID },
-		`SELECT l.id,l.title,l.content,l.content_revision AS revision FROM lessons l
+		`SELECT l.id,l.title,l.content,l.content_revision AS revision,`+lessonEnrichmentDetails+` AS enrichment FROM lessons l
 		JOIN lesson_reviews review ON review.tenant_id=l.tenant_id AND review.lesson_id=l.id AND review.lesson_revision=l.content_revision
 		JOIN memberships author ON author.tenant_id=l.tenant_id AND author.id=l.author_membership_id
 		WHERE l.status='DRAFT' AND author.user_id<>$2 AND review.approved_at IS NULL

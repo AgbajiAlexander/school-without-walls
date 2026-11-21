@@ -20,17 +20,32 @@ type Handler struct{ pool *pgxpool.Pool }
 func NewHandler(pool *pgxpool.Pool) *Handler { return &Handler{pool: pool} }
 
 type publishedLesson struct {
-	ID            uuid.UUID `json:"id"`
-	Title         string    `json:"title"`
-	Subject       string    `json:"subject"`
-	ObjectiveCode string    `json:"objective_code"`
-	PublishedAt   time.Time `json:"published_at"`
-	Content       *string   `json:"content,omitempty"`
+	ID            uuid.UUID          `json:"id"`
+	Title         string             `json:"title"`
+	Subject       string             `json:"subject"`
+	ObjectiveCode string             `json:"objective_code"`
+	PublishedAt   time.Time          `json:"published_at"`
+	Content       *string            `json:"content,omitempty"`
+	Enrichment    []lessonEnrichment `json:"enrichment,omitempty"`
 }
+
+type lessonEnrichment struct {
+	Code      string `json:"code"`
+	Text      string `json:"text"`
+	Withdrawn bool   `json:"withdrawn"`
+}
+
+const lessonEnrichmentDetails = `(
+			SELECT jsonb_agg(jsonb_build_object('code',r.code,'text',r.objective_text,'withdrawn',f.status='WITHDRAWN') ORDER BY r.code,a.id)
+			FROM curriculum_objective_alignments a JOIN curriculum_objectives r ON r.id=a.related_objective_id
+			JOIN curriculum_framework_versions f ON f.id=r.framework_version_id
+			WHERE a.id=ANY(l.enrichment_alignment_ids)
+		)`
 
 const studentLessonQuery = `
 	SELECT l.id,l.title,subject.name AS subject,objective.code AS objective_code,l.published_at,
-		CASE WHEN $3::uuid IS NOT NULL THEN l.content END AS content
+		CASE WHEN $3::uuid IS NOT NULL THEN l.content END AS content,
+		CASE WHEN $3::uuid IS NOT NULL THEN ` + lessonEnrichmentDetails + ` END AS enrichment
 	FROM tenants t JOIN users u ON u.id=$2 AND u.status='ACTIVE'
 	JOIN memberships m ON m.tenant_id=t.id AND m.user_id=u.id AND m.role='STUDENT' AND m.status='ACTIVE'
 	JOIN students s ON s.tenant_id=t.id AND s.user_id=u.id AND s.status='ACTIVE'

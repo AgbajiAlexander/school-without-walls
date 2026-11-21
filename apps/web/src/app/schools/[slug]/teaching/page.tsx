@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { headers } from "next/headers";
 import { redirect } from "next/navigation";
-import LessonEditor from "./lesson-editor";
+import LessonEditor, { type EnrichmentOption } from "./lesson-editor";
 
 type Page<T> = { items: T[]; next?: string };
 type Offering = { id: string; subject: string; class_name: string; arm_name?: string; term_name: string };
-type Objective = { id: string; code: string; objective_text: string };
-type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string };
+type Objective = { id: string; code: string; objective_text: string; enrichment?: EnrichmentOption[] };
+type Lesson = { id: string; title: string; status: string; content?: string; objective_code: string; review_required: boolean; review_status: string; enrichment?: EnrichmentOption[] };
 
 export default async function TeachingPage({ params, searchParams }: {
   params: Promise<{ slug: string }>;

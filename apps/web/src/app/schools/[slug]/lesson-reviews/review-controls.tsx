@@ -3,7 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useRef, useState } from "react";
 
-export type ReviewItem = { id: string; title: string; content: string; revision: number };
+export type ReviewItem = { id: string; title: string; content: string; revision: number; enrichment?: { code: string; text: string; withdrawn: boolean }[] };
 
 export default function ReviewControls({ base, csrf, items, required, canConfigure }: {
   base: string; csrf: string; items: ReviewItem[]; required: boolean; canConfigure: boolean;
@@ -55,6 +55,9 @@ export default function ReviewControls({ base, csrf, items, required, canConfigu
         <article key={item.id} className="space-y-2 rounded-xl border p-4">
           <h3 className="font-semibold">{item.title}</h3>
           <p className="whitespace-pre-wrap break-words">{item.content}</p>
+          {item.enrichment?.length ? <ul aria-label="Optional enrichment" className="space-y-1">
+            {item.enrichment.map((mapping, index) => <li key={index}>{mapping.code} · {mapping.text}{mapping.withdrawn && " (edition withdrawn)"}</li>)}
+          </ul> : null}
           {confirmed === item.id ? <div className="flex flex-wrap items-center gap-3">
             <p>Approve this exact lesson revision?</p>
             <button type="button" disabled={pending} className="min-h-11 rounded bg-green-800 px-3 text-white"

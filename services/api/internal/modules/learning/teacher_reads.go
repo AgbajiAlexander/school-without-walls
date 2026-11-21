@@ -19,20 +19,45 @@ type teachingOfferingSummary struct {
 }
 
 type teachingObjective struct {
-	ID            uuid.UUID `json:"id"`
-	Code          string    `json:"code"`
-	ObjectiveText string    `json:"objective_text"`
+	ID            uuid.UUID          `json:"id"`
+	Code          string             `json:"code"`
+	ObjectiveText string             `json:"objective_text"`
+	Enrichment    []enrichmentOption `json:"enrichment"`
 }
 
 type teacherLessonRecord struct {
-	ID             uuid.UUID `json:"id"`
-	OfferingID     uuid.UUID `json:"offering_id"`
-	Title          string    `json:"title"`
-	Status         string    `json:"status"`
-	Content        *string   `json:"content,omitempty"`
-	ObjectiveCode  string    `json:"objective_code"`
-	ReviewRequired bool      `json:"review_required"`
-	ReviewStatus   string    `json:"review_status"`
+	ID             uuid.UUID          `json:"id"`
+	OfferingID     uuid.UUID          `json:"offering_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	Content        *string            `json:"content,omitempty"`
+	ObjectiveCode  string             `json:"objective_code"`
+	ReviewRequired bool               `json:"review_required"`
+	ReviewStatus   string             `json:"review_status"`
+	Enrichment     []enrichmentOption `json:"enrichment,omitempty"`
+}
+
+type enrichmentOption struct {
+	ID       uuid.UUID `json:"id"`
+	Code     string    `json:"code"`
+	Text     string    `json:"text"`
+	Selected bool      `json:"selected"`
+	Eligible bool      `json:"eligible"`
+}
+
+func teachingEnrichment(session, selected string) string {
+	return `(SELECT COALESCE(jsonb_agg(jsonb_build_object(
+		'id',a.id,'code',related.code,'text',related.objective_text,
+		'selected',a.id=ANY(` + selected + `),'eligible',choice.id IS NOT NULL AND related_edition.status='PUBLISHED'
+	) ORDER BY related.code,a.id),'[]'::jsonb)
+	FROM curriculum_objective_alignments a
+	JOIN curriculum_objectives related ON related.id=a.related_objective_id AND related.stage=p.stage
+	JOIN curriculum_framework_versions related_edition ON related_edition.id=related.framework_version_id
+	LEFT JOIN school_current_curriculum_selections choice ON choice.tenant_id=t.id
+		AND choice.session_id=` + session + ` AND choice.stage=p.stage AND choice.curriculum_role='ENRICHMENT'
+		AND choice.framework_version_id=related.framework_version_id
+	WHERE a.primary_objective_id=p.id AND a.review_status='HUMAN_REVIEWED'
+	  AND ((choice.id IS NOT NULL AND related_edition.status='PUBLISHED') OR a.id=ANY(` + selected + `))) AS enrichment`
 }
 
 func (h *Handler) ListTeachingOfferings(w http.ResponseWriter, r *http.Request) {
@@ -53,7 +78,7 @@ func (h *Handler) ListTeachingObjectives(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	teacherPage(h, w, r, pgx.RowToStructByName[teachingObjective], func(o teachingObjective) uuid.UUID { return o.ID },
-		`SELECT p.id,p.code,p.objective_text`+teacherOfferingJoins+`
+		`SELECT p.id,p.code,p.objective_text,`+teachingEnrichment("term.session_id", "ARRAY[]::uuid[]")+teacherOfferingJoins+`
 		JOIN academic_terms term ON term.tenant_id=o.tenant_id AND term.id=o.term_id
 		JOIN academic_sessions session ON session.tenant_id=o.tenant_id AND session.id=term.session_id AND session.status<>'ARCHIVED'
 		JOIN classes c ON c.tenant_id=o.tenant_id AND c.id=o.class_id AND c.session_id=term.session_id AND c.status='ACTIVE'
@@ -69,6 +94,7 @@ func (h *Handler) ListTeachingObjectives(w http.ResponseWriter, r *http.Request)
 const ownedLessonJoin = teacherOfferingJoins + `
 	JOIN lessons l ON l.tenant_id=o.tenant_id AND l.offering_id=o.id AND l.author_membership_id=m.id
 	JOIN curriculum_objectives p ON p.id=l.primary_objective_id
+ JOIN school_curriculum_selections pinned ON pinned.tenant_id=l.tenant_id AND pinned.id=l.curriculum_selection_id
 	LEFT JOIN lesson_reviews review ON review.tenant_id=l.tenant_id AND review.lesson_id=l.id AND review.lesson_revision=l.content_revision
 	WHERE t.slug=$1::citext AND t.status='ACTIVE'
 `
@@ -78,7 +104,7 @@ func (h *Handler) ListTeacherLessons(w http.ResponseWriter, r *http.Request) {
 		`SELECT l.id,l.offering_id,l.title,l.status,NULL::text AS content,p.code AS objective_code,
 		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
 		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
-			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status`+ownedLessonJoin+
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,NULL::jsonb AS enrichment`+ownedLessonJoin+
 			`AND ($3::uuid IS NULL OR l.id>$3) ORDER BY l.id LIMIT 51`)
 }
 
@@ -95,7 +121,7 @@ func (h *Handler) GetTeacherLesson(w http.ResponseWriter, r *http.Request) {
 		SELECT l.id,l.offering_id,l.title,l.status,l.content,p.code AS objective_code,
 		COALESCE(t.feature_flags->'lesson_review_required'='true'::jsonb,false) AS review_required,
 		CASE WHEN review.approved_at IS NOT NULL THEN 'APPROVED'
-			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status`+ownedLessonJoin+`AND l.id=$3`,
+			WHEN review.lesson_id IS NOT NULL THEN 'PENDING' ELSE 'UNSUBMITTED' END AS review_status,`+teachingEnrichment("pinned.session_id", "l.enrichment_alignment_ids")+ownedLessonJoin+`AND l.id=$3`,
 		chi.URLParam(r, "slug"), actor, id)
 	if err != nil {
 		lessonReadError(w, r, err)
