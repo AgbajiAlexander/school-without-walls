@@ -48,9 +48,20 @@ func testTeacherLessonHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 	payload := func(id uuid.UUID) string {
 		return fmt.Sprintf(`{"offering_id":%q,"primary_objective_id":%q,"title":"Fictional lesson","content":"Original lesson text"}`, offering, id)
 	}
+	offerings := strings.TrimSuffix(path, "lessons") + "offerings"
+	objectives := offerings + "/" + offering.String() + "/objectives"
+	if body := send("GET", offerings, "", "", 200); strings.Contains(string(body), offering.String()) {
+		t.Fatal("unassigned offering was disclosed")
+	}
 	send("POST", path, csrf, payload(objective), 404)
 	assignment := uuid.New()
 	write(`INSERT INTO teacher_assignments (id,tenant_id,offering_id,teacher_membership_id) VALUES ($1,$2,$3,$4)`, assignment, school, offering, membership)
+	if body := send("GET", offerings, "", "", 200); !strings.Contains(string(body), offering.String()) {
+		t.Fatal("assigned offering was missing")
+	}
+	if body := send("GET", objectives, "", "", 200); !strings.Contains(string(body), objective.String()) || strings.Contains(string(body), staleObjective.String()) {
+		t.Fatal("objective list must use the offering's current primary selection")
+	}
 	send("POST", path, "", payload(objective), 403)
 	send("POST", strings.Replace(path, "lesson-fixture-a", "lesson-fixture-b", 1), csrf, payload(objective), 404)
 	send("POST", path, csrf, payload(staleObjective), 422)
@@ -59,8 +70,16 @@ func testTeacherLessonHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 		t.Fatal("draft ID missing")
 	}
 	detail := path + "/" + result.Data.ID.String()
+	if body := send("GET", path, "", "", 200); !strings.Contains(string(body), result.Data.ID.String()) || strings.Contains(string(body), "Original lesson text") {
+		t.Fatal("lesson list must include draft summaries without content")
+	}
+	if body := send("GET", detail, "", "", 200); !strings.Contains(string(body), "Original lesson text") {
+		t.Fatal("assigned author must see draft content")
+	}
+	send("GET", strings.Replace(detail, "lesson-fixture-a", "lesson-fixture-b", 1), "", "", 404)
 	send("PATCH", detail, csrf, `{"title":"Edited lesson","content":"Edited text"}`, 200)
 	write(`UPDATE teacher_assignments SET status='INACTIVE' WHERE id=$1`, assignment)
+	send("GET", detail, "", "", 404)
 	send("POST", detail+"/publish", csrf, "", 404)
 	write(`INSERT INTO teacher_assignments (id,tenant_id,offering_id,teacher_membership_id) VALUES ($1,$2,$3,$4)`, uuid.New(), school, offering, membership)
 	send("POST", detail+"/publish", csrf, "", 200)

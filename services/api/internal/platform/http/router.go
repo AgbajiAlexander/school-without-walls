@@ -223,6 +223,10 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 		if learningH != nil {
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons", learningH.ListStudentLessons)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}", learningH.GetStudentLesson)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings", learningH.ListTeachingOfferings)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/objectives", learningH.ListTeachingObjectives)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons", learningH.ListTeacherLessons)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}", learningH.GetTeacherLesson)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons", learningH.CreateTeacherLesson)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/teaching/lessons/{lessonID}", learningH.UpdateTeacherLesson)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/publish", learningH.PublishTeacherLesson)

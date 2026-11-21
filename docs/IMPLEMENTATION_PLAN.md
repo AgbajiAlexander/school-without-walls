@@ -375,3 +375,9 @@ The PostgreSQL HTTP regression covered an anonymous request, direct access befor
 Teachers with an active offering assignment can create and edit their own plain-text lesson drafts, publish eligible drafts, and archive published lessons. Go rechecks the active actor, tenant, membership, assignment, and offering under row locks. The current primary curriculum selection is resolved on the server at creation. Draft edits, publication, and archival preserve the pinned curriculum reference. Each successful mutation records a tenant audit event in the same transaction.
 
 PostgreSQL HTTP coverage exercises the assignment gate, missing CSRF, cross-school denial, stale curriculum objective, draft editing, assignment revocation, one-time publication, published-text immutability, and archival. Teacher browsing and the classroom dashboards remain open, as do optional review, enrichment links, and media.
+
+### SWW-007 teacher lesson read API
+
+The teaching API lists assigned offerings, eligible objectives from the current primary edition, and the teacher's own lesson summaries. The direct lesson route returns full text only when the requesting teacher is the author and still holds the active offering assignment. Reads are uncached and lists use a bounded cursor.
+
+The focused PostgreSQL HTTP regression verified assignment-scoped offering discovery, current-edition objective filtering, draft summary versus detail, cross-school denial, and loss of detail access after assignment revocation. The next application slice is the teacher and learner browser workflow.

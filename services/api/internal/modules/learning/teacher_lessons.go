@@ -27,12 +27,15 @@ type lessonDraft struct {
 var errLessonConflict = errors.New("lesson state changed")
 
 // The author must retain the matching assignment for every mutation.
-const teacherOffering = `
+const teacherOfferingJoins = `
  FROM tenants t
  JOIN users u ON u.id=$2 AND u.status='ACTIVE'
  JOIN memberships m ON m.tenant_id=t.id AND m.user_id=u.id AND m.role='TEACHER' AND m.status='ACTIVE'
  JOIN teacher_assignments a ON a.tenant_id=t.id AND a.teacher_membership_id=m.id AND a.status='ACTIVE'
  JOIN subject_offerings o ON o.tenant_id=t.id AND o.id=a.offering_id AND o.status='ACTIVE'
+`
+
+const teacherOffering = teacherOfferingJoins + `
  WHERE t.slug=$1::citext AND t.status='ACTIVE' AND o.id=$3
 `
 
