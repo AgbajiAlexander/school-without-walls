@@ -363,3 +363,9 @@ The PostgreSQL HTTP test verified denial of school-member writes and draft previ
 Migration 000014 adds tenant-scoped text lesson drafts tied to an offering, author membership, curriculum selection revision, and a primary objective. New drafts use the current primary edition for the offering's session and stage. Existing drafts retain the original reference when a school selects another edition. Publication requires an active session and a still-published pinned edition. Published text is immutable and archival retains its history.
 
 The disposable PostgreSQL regression verified wrong-school and wrong-edition denial, draft-session publication denial, historical edition pinning, withdrawal before publication, and archival. Teacher assignment and learner enrollment authorization must be applied in the Go API. The teacher and student pages, optional lesson review, enrichment links, and media remain open.
+
+### SWW-007 student lesson read API
+
+The lesson feed and direct lesson reads use the same tenant-scoped authorization query. It checks active learner identity, STUDENT membership, linked student profile, enrollment, school session, local term dates, class or arm, offering, and publication time. The feed returns bounded summaries and the detail route returns plain lesson text only for eligible students. Ending an enrollment blocks subsequent reads.
+
+The PostgreSQL HTTP regression covered an anonymous request, direct access before and after enrollment, published summaries, draft exclusion, cross-school denial, and access after enrollment ends. The teacher API and the student browser workflow remain open.

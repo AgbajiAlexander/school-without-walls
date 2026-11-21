@@ -29,11 +29,11 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		VALUES ($1,'lesson-teacher@example.test','unused','Fictional teacher','ACTIVE')`, user)
 	run("", `INSERT INTO memberships (id,tenant_id,user_id,role) VALUES ($1,$2,$3,'TEACHER')`, membership, school, user)
 	run("", `INSERT INTO academic_sessions (id,tenant_id,name,starts_on,ends_on)
-		VALUES ($1,$2,'Fictional lesson session','2030-09-01','2031-07-31')`, session, school)
+		VALUES ($1,$2,'Fictional lesson session',CURRENT_DATE-20,CURRENT_DATE+160)`, session, school)
 	run("", `INSERT INTO academic_terms (id,tenant_id,session_id,sequence,name,starts_on,ends_on) VALUES
-		($1,$2,$3,1,'First','2030-09-01','2030-12-31'),
-		($4,$2,$3,2,'Second','2031-01-01','2031-03-31'),
-		($5,$2,$3,3,'Third','2031-04-01','2031-07-31')`, term, school, session, uuid.New(), uuid.New())
+		($1,$2,$3,1,'First',CURRENT_DATE-20,CURRENT_DATE+20),
+		($4,$2,$3,2,'Second',CURRENT_DATE+21,CURRENT_DATE+80),
+		($5,$2,$3,3,'Third',CURRENT_DATE+81,CURRENT_DATE+160)`, term, school, session, uuid.New(), uuid.New())
 	run("", `INSERT INTO grade_levels (id,tenant_id,stage,code,name,sort_order)
 		VALUES ($1,$2,'PRIMARY','LESSON','Fictional Primary',1)`, grade, school)
 	run("", `INSERT INTO classes (id,tenant_id,session_id,grade_level_id,code,name)
@@ -72,6 +72,7 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		Scan(&pinned); err != nil || pinned != selection {
 		t.Fatal("publication must retain the original edition selection")
 	}
+	testStudentLessonHTTP(t, ctx, pool, school, session, term, class, lesson, pending)
 	run("23514", `UPDATE lessons SET content='changed' WHERE id=$1`, lesson)
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, first)
 	run("23514", publish, pending)
