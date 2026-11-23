@@ -11,7 +11,7 @@ export function readLessonSession() {
   return readLearningApi<{ csrf_token: string }>("/api/v1/auth/me");
 }
 
-async function readLearningApi<T>(path: string): Promise<T | null> {
+export async function readLearningApi<T>(path: string): Promise<T | null> {
   const cookie = (await headers()).get("cookie");
   if (!cookie) redirect("/login");
   let response: Response;

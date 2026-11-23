@@ -53,7 +53,7 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 	}
 	defer listener.Close()
 	scanResult := make(chan error, 1)
-	go func() {
+	scanFixture := func() {
 		conn, err := listener.Accept()
 		if err != nil {
 			scanResult <- err
@@ -83,7 +83,8 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		}
 		_, err = io.WriteString(conn, "stream: OK\x00")
 		scanResult <- err
-	}()
+	}
+	go scanFixture()
 	write := func(q string, args ...any) {
 		t.Helper()
 		if _, err := pool.Exec(ctx, q, args...); err != nil {
@@ -229,4 +230,47 @@ func testLessonMediaHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool, 
 		t.Fatal("rejected attachment must not be advertised")
 	}
 	hit("GET", download, studentToken, "", "", 404)
+
+	homework := edit + "/assignments"
+	assignmentBody := fmt.Sprintf(`{"title":"File fixture","instructions":"Upload the fictional handout","due_at":%q,"max_score":10,"submission_type":"FILE"}`,
+		time.Now().UTC().Add(time.Hour).Format(time.RFC3339))
+	assignment := parseID(hit("POST", homework, teacherToken, csrf, assignmentBody, 201))
+	hit("POST", homework+"/"+assignment.String()+"/open", teacherToken, csrf, "", 200)
+	fileURL := strings.TrimSuffix(download, "/media") + "/assignments/" + assignment.String() + "/file"
+	key := uuid.NewString()
+	sendFile := func(path, credential, header, kind, contents string, want int) {
+		t.Helper()
+		req := httptest.NewRequest("POST", path, strings.NewReader(contents))
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: credential})
+		req.Header.Set(auth.HeaderCSRF, header)
+		req.Header.Set("Content-Type", kind)
+		req.Header.Set("Idempotency-Key", key)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("file submission status %d, want %d", rec.Code, want)
+		}
+	}
+	sendFile(fileURL, studentToken, "", "application/pdf", data, 403)
+	sendFile(fileURL, teacherToken, csrf, "application/pdf", data, 404)
+	sendFile(fileURL, studentToken, csrf, "application/pdf", "disguised text", 422)
+	sendFile(fileURL, studentToken, csrf, "application/pdf", strings.Repeat("x", (4<<20)+1), 422)
+	go scanFixture()
+	sendFile(fileURL, studentToken, csrf, "application/pdf", data, 201)
+	if scanErr := <-scanResult; scanErr != nil {
+		t.Fatal("file was not scanned")
+	}
+	sendFile(fileURL, studentToken, csrf, "application/pdf", data, 200)
+	sendFile(fileURL, studentToken, csrf, "application/pdf", data+" different", 409)
+	var submission uuid.UUID
+	if err := pool.QueryRow(ctx, `SELECT id FROM assignment_submissions WHERE tenant_id=$1 AND assignment_id=$2 AND file_id IS NOT NULL`,
+		school, assignment).Scan(&submission); err != nil {
+		t.Fatal("accepted file must have a durable submission")
+	}
+	grant := homework + "/" + assignment.String() + "/submissions/" + submission.String() + "/file"
+	hit("GET", grant, studentToken, "", "", 404)
+	hit("GET", strings.Replace(grant, "lesson-fixture-a", "lesson-fixture-b", 1), teacherToken, "", "", 404)
+	if reply := hit("GET", grant, teacherToken, "", "", 200); !strings.Contains(reply, "/ready/") {
+		t.Fatal("teacher file grant must target ready storage")
+	}
 }

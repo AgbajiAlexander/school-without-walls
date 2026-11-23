@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -72,6 +73,72 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 		Scan(&pinned); err != nil || pinned != selection {
 		t.Fatal("publication must retain the original edition selection")
 	}
+	const createAssignment = `INSERT INTO assignments (id,tenant_id,lesson_id,title,instructions,due_at,max_score,submission_type)
+		VALUES ($1,$2,$3,'Counting practice','Count five objects.',clock_timestamp()+interval '1 day',$4,$5)`
+	openAssignment := `UPDATE assignments SET status='OPEN' WHERE id=$1`
+	assignment, unpublishedAssignment := uuid.New(), uuid.New()
+	run("23503", createAssignment, uuid.New(), foreign, lesson, 10, "TEXT")
+	run("23514", createAssignment, uuid.New(), school, lesson, 0, "TEXT")
+	run("23514", createAssignment, uuid.New(), school, lesson, 10, "UNKNOWN")
+	run("", createAssignment, assignment, school, lesson, 10, "TEXT")
+	run("", createAssignment, unpublishedAssignment, school, pending, 10, "TEXT")
+	run("23514", openAssignment, unpublishedAssignment)
+	run("23514", `UPDATE assignments SET status='CLOSED' WHERE id=$1`, assignment)
+	run("", `UPDATE assignments SET due_at=clock_timestamp()-interval '1 minute' WHERE id=$1`, assignment)
+	run("23514", openAssignment, assignment)
+	run("", `UPDATE assignments SET due_at=clock_timestamp()+interval '1 day' WHERE id=$1`, assignment)
+	run("", openAssignment, assignment)
+	run("23514", `UPDATE assignments SET status='CLOSED',max_score=20 WHERE id=$1`, assignment)
+	run("", `UPDATE assignments SET status='CLOSED' WHERE id=$1`, assignment)
+	run("23514", openAssignment, assignment)
+
+	const schemeInsert = `INSERT INTO assessment_schemes (id,tenant_id,term_id,stage,version) VALUES ($1,$2,$3,$4,$5)`
+	const componentInsert = `INSERT INTO assessment_components (id,tenant_id,scheme_id,name,max_score,weight) VALUES ($1,$2,$3,$4,$5,$6)`
+	const publishScheme = `UPDATE assessment_schemes SET status='PUBLISHED' WHERE id=$1`
+	scheme, component := uuid.New(), uuid.New()
+	run("23503", schemeInsert, uuid.New(), foreign, term, "PRIMARY", 1)
+	run("23514", schemeInsert, uuid.New(), school, term, "EARLY_YEARS", 1)
+	run("", schemeInsert, scheme, school, term, "PRIMARY", 1)
+	run("23514", publishScheme, scheme)
+	run("23503", componentInsert, uuid.New(), foreign, scheme, "Foreign fixture", 10, 30)
+	run("23514", componentInsert, uuid.New(), school, scheme, "Invalid maximum", 0, 30)
+	run("", componentInsert, component, school, scheme, "Fictional coursework", 20, "30.25")
+	run("23505", componentInsert, uuid.New(), school, scheme, "fictional coursework", 20, 20)
+	run("23514", publishScheme, scheme)
+	run("", componentInsert, uuid.New(), school, scheme, "Fictional examination", 60, "69.76")
+	run("23514", publishScheme, scheme)
+	run("", `UPDATE assessment_components SET weight=69.75 WHERE tenant_id=$1 AND scheme_id=$2 AND id<>$3`, school, scheme, component)
+	run("", publishScheme, scheme)
+	run("23514", `UPDATE assessment_components SET weight=31 WHERE id=$1`, component)
+	run("23514", `DELETE FROM assessment_components WHERE id=$1`, component)
+	run("23514", `UPDATE assessment_schemes SET status='DRAFT' WHERE id=$1`, scheme)
+	nextScheme, nextComponent := uuid.New(), uuid.New()
+	run("", schemeInsert, nextScheme, school, term, "PRIMARY", 2)
+	run("", componentInsert, nextComponent, school, nextScheme, "Fictional revised scheme", 10, 100)
+	staleTx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer staleTx.Rollback(ctx)
+	var staleVersion int
+	if err := staleTx.QueryRow(ctx, `SELECT version FROM assessment_schemes WHERE id=$1`, nextScheme).Scan(&staleVersion); err != nil {
+		t.Fatal(err)
+	}
+	run("", `UPDATE assessment_components SET weight=90 WHERE id=$1`, nextComponent)
+	_, staleErr := staleTx.Exec(ctx, publishScheme, nextScheme)
+	var staleDatabaseError *pgconn.PgError
+	if !errors.As(staleErr, &staleDatabaseError) || staleDatabaseError.Code != "40001" {
+		t.Fatalf("publication with stale assessment weights must fail serialization: %v", staleErr)
+	}
+	if err := staleTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	run("23514", publishScheme, nextScheme)
+	var published bool
+	if err := pool.QueryRow(ctx, `SELECT published_at IS NOT NULL FROM assessment_schemes WHERE tenant_id=$1 AND id=$2`, school, scheme).Scan(&published); err != nil || !published {
+		t.Fatal("publication must record its database timestamp")
+	}
+	testSchoolOperatingMode(t, ctx, pool, school, user)
 	testStudentLessonHTTP(t, ctx, pool, school, session, term, class, lesson, pending)
 	english, extra, alignment := uuid.New(), uuid.New(), uuid.New()
 	run("", `INSERT INTO curriculum_framework_versions
@@ -128,9 +195,29 @@ func testLessonLifecycle(t *testing.T, ctx context.Context, pool *pgxpool.Pool) 
 	run("23514", `UPDATE lesson_media SET status='READY' WHERE id=$1`, clean)
 	testTeacherLessonHTTP(t, ctx, pool, school, user, membership, offering, secondObjective, firstObjective)
 	testLessonMediaHTTP(t, ctx, pool, school, user, offering, secondObjective, session, term, class)
+	testAttendanceRoster(t, ctx, pool, school, foreign, user, membership, session, term, class, subject)
 	run("23514", `UPDATE lessons SET content='changed' WHERE id=$1`, lesson)
 	run("", `UPDATE curriculum_framework_versions SET status='WITHDRAWN' WHERE id=$1`, first)
 	run("23514", publish, pending)
 	run("", `UPDATE lessons SET status='ARCHIVED' WHERE id=$1`, lesson)
 	run("23514", `DELETE FROM lessons WHERE id=$1`, lesson)
+
+	student, placement := uuid.New(), uuid.New()
+	run("", `INSERT INTO students (id,tenant_id,admission_no,display_name,stage)
+		VALUES ($1,$2,'FIX-SCORE','Fictional Learner','PRIMARY')`, student, school)
+	run("", `INSERT INTO enrollments (id,tenant_id,student_id,session_id,term_id,class_id)
+		VALUES ($1,$2,$3,$4,$5,$6)`, placement, school, student, session, term, class)
+	const scoreInsert = `INSERT INTO assessment_scores
+		(id,tenant_id,enrollment_id,offering_id,component_id,score) VALUES ($1,$2,$3,$4,$5,$6)`
+	score := uuid.New()
+	run("23514", scoreInsert, score, foreign, placement, offering, component, "0")
+	run("23514", scoreInsert, score, school, placement, offering, component, "-0.01")
+	run("23514", scoreInsert, score, school, placement, offering, component, "20.01")
+	run("23514", scoreInsert, score, school, placement, offering, component, "19.999")
+	run("", scoreInsert, score, school, placement, offering, component, "0")
+	run("23505", scoreInsert, uuid.New(), school, placement, offering, component, "0")
+	run("", `UPDATE assessment_scores SET score=20.00 WHERE id=$1`, score)
+	run("23514", `UPDATE assessment_scores SET score=20.01 WHERE id=$1`, score)
+	run("", `DELETE FROM assessment_scores WHERE id=$1`, score)
+	testAssessmentScoreHTTP(t, ctx, pool, school, user, offering, component, placement)
 }

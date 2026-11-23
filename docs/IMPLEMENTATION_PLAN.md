@@ -21,7 +21,7 @@ Use task IDs below as bounded milestones. Each task ends with code, validation, 
 | SWW-006 | Framework/version/objective registry and alignment workflow | Nigerian primary + British enrichment mapping; old versions retained, review gate | 004C |
 | SWW-007 | Teacher lessons + student reading | Published lesson available to enrolled learner only; responsive text-first UI | 005,006 |
 | SWW-008 | Assignment/submission/feedback/progress | Student submission, teacher feedback, score constraints, access tests | 007 |
-| SWW-009 | Attendance + school remote mode + notices | Attendance update logged; remote mode banner without false presence | 005,007 |
+| [x] SWW-009 | Attendance + school remote mode + notices | Attendance update logged; remote mode banner without false presence | 005,007 |
 | SWW-010 | Assessment scheme, scores, report approval/publication | Weights sum 100; no draft report leakage; version snapshots | 005,008 |
 | SWW-011 | Early Years observations + parental dashboard | Qualitative reports; child-specific view; no forced numeric mark | 005,010 |
 | SWW-012 | Go AI gateway + teacher drafts + student tutor | No exposed secrets, age/tenant gating, human review, safety tests | 006,007 |
@@ -467,3 +467,116 @@ The PostgreSQL-required lesson lifecycle regression covered no session, missing 
 
 
 All seven controlled Edge journeys passed in the final run. The learner started a lesson, reloaded, completed it, and reloaded again to confirm the saved state. The run also verified teacher upload and both reviewer and learner downloads after removing the dependency on a new tab. The 197 frontend tests, focused download test, security headers, and Next.js lint, type and build checks passed.
+
+
+### SWW-008 assignment lifecycle storage
+
+Migration 000020 adds tenant-bound assignments linked to lessons. It requires a published lesson and a future deadline before opening an assignment, validates a positive maximum score and the submission type, and preserves the settings once opened. A closed assignment cannot be reopened. The disposable PostgreSQL lesson lifecycle test covered cross-school linkage, invalid score and submission type, unpublished lesson and elapsed deadline denial, and opening and closing. Teacher and student endpoints, browser controls, submission storage and feedback remain open.
+
+
+### SWW-008 teacher assignment management and learner visibility
+
+Assigned lesson authors can create and edit text assignment drafts, open them after lesson publication, and close them explicitly. Mutation and audit writes commit together. The student lesson view lists released assignments only for current enrollment. It retains closed assignments for reference. Deadlines are displayed and entered in UTC. Submission and feedback remain separate, unfinished workflows.
+
+The PostgreSQL-required HTTP regression verified CSRF, cross-school denial, lost teaching authorization, hidden drafts, ended enrollment, lifecycle conflicts and one audit per successful action. The final seven Edge journeys included teacher draft creation and editing, learner draft invisibility, opening, and learner-visible closure after reload. Full Go test, vet and build, 197 frontend tests, five security-header tests, and Next.js lint, typecheck and production build passed.
+
+
+### SWW-008 student text submissions
+
+Migration 000021 stores immutable, tenant-scoped submission revisions. Current enrollment and the published lesson are rechecked before accepting a submission. PostgreSQL checks the deadline against its wall clock, serializes attempts by learner, and commits a new revision and audit together. Replaying the same request identifier and answer returns the original receipt. A different answer requires a new request identifier and is allowed only when resubmission is enabled.
+
+The PostgreSQL HTTP regression verified deadline and closure denial, CSRF, foreign-school and ended-enrollment denial, resubmission rules, receipt privacy and audit counts. Seven Edge journeys passed, including text submission and the receipt after reload. The Go regression, vet and build, the 197 frontend tests, security-header checks, and Next.js lint, type and build checks passed. File submissions and scoring and feedback remain open.
+
+
+### SWW-008 scoring and returned feedback
+
+Migration 000022 adds tenant-bound feedback for each exact submission revision. The assigned lesson author can grade the latest revision or correct it with the current feedback version. The API rejects stale grading and scores above the assignment maximum. Each successful change and the audit of its score and version commit together. Comments are excluded from audit metadata. The learner sees the returned score and comment for their current revision; a resubmission clears feedback from the prior revision on screen.
+
+Disposable PostgreSQL verified authorization, CSRF, score bounds, stale edits and audit redaction. All seven Edge journeys passed, including the teacher returning and correcting a score and the enrolled learner seeing both updates after reload. Full PostgreSQL-required Go tests, vet and build, 198 frontend tests, five security-header tests, and Next.js lint, typecheck and production build passed. File submissions remain open.
+
+
+### SWW-008 scanned file submissions
+
+Migration 000023 adds file-backed revisions alongside text revisions. When private media is enabled, teachers can open file assignments and enrolled students can submit PDF, PNG or JPEG files up to 4 MiB over the same-origin API. The scan concurrency limit also bounds upload buffering. The API validates type and size and scans the exact bytes before writing to private storage. It rechecks enrollment, deadline and resubmission policy before committing the receipt and audit. Retrying the same file and request ID returns the same receipt. Assigned teachers can request a two-minute download for the latest revision.
+
+Disposable PostgreSQL verified CSRF, role and tenant isolation, size and type rejection, file replay and authorized signing. Seven Edge journeys passed, including a fictional PDF upload, receipt after reload and teacher download of the exact bytes. Required Go tests, vet and build, 198 frontend tests, security headers, and Next.js lint, typecheck and build passed. Real-provider scanning and timeout behavior remain rollout gates. A clean object can be orphaned if final acceptance fails or concurrent attempts race, so retention and cleanup of unreferenced ready objects remain open.
+
+
+### SWW-009 scheduled school operating mode
+
+Migration 000024 defaults existing schools to on-site operation and adds one scheduled Remote or Hybrid interval with a reason, optional help text and an HTTPS schedule link. Owners, administrators and principals can update the schedule through authenticated, CSRF-protected settings. PostgreSQL evaluates start-inclusive and end-exclusive intervals. Active school members see the effective banner on My Schools. Returning on site clears the schedule, and expiry makes it ineffective. Mode changes write an audit event and do not infer attendance.
+
+The PostgreSQL regression verified scheduling, expiry, role and tenant restrictions, CSRF, invalid links and audit redaction. The final seven Edge journeys included Remote and Hybrid banners on the correct school, display of the schedule link and removal of the banner on restoration. PostgreSQL-required Go tests, vet and build, 198 frontend tests, five security-header tests, and Next.js lint, typecheck and build passed. Attendance recording and corrections, participation reporting, and targeted notices remain open.
+
+
+### SWW-009 dated attendance roster and storage
+
+Migration 000025 binds each attendance mark to a tenant-scoped enrollment placement and makes the student, class, school date and session combination unique. A mark has an explicit On site or Remote mode. The teacher dashboard reads a roster for an assigned offering and valid term date. For today it uses the placement active at query time. For past days it uses the last placement that overlapped that school-local day, so a same-day transfer appears in only one arm. The roster shows any saved mark without inferring presence.
+
+Disposable PostgreSQL verified tenant and uniqueness constraints, invalid mode rejection, the same-day transfer, future and cross-school denial and teacher-assignment revocation. All seven Edge journeys passed, including the teacher loading the current dated roster. PostgreSQL-required Go tests, vet and build, 198 frontend tests, security headers, and Next.js lint, typecheck and build passed. Taking attendance, audit-backed corrections, linked-guardian views, participation reports and notices remain open.
+
+
+### SWW-009 teacher attendance entry and corrections
+
+Assigned teachers save up to 50 changed marks from one dated roster page. Each mark requires an explicit attendance status and physical or remote mode. An identical replay makes no additional change. Corrections require the displayed version and a reason. The batch and its audit events commit together. The audit records the actor, prior and new mode and status, reason, and timestamp. The API serializes writes for the class and rechecks placement after it locks the affected learner records. No additional migration is required beyond 000025.
+
+The disposable PostgreSQL regression verified missing CSRF, cross-school and wrong-arm denial, reason enforcement, identical replay, stale correction rejection and the original and corrected audit values. Full PostgreSQL-required Go tests, vet and build passed. Linked-guardian attendance, participation reporting and targeted notices remain open.
+
+
+The final seven Edge journeys passed, including first attendance entry, a reload, rejection of a missing correction reason in the browser, and the corrected Remote mark after another reload. All 198 frontend tests, five security-header tests, and the Next.js lint, typecheck and production build passed.
+
+
+### SWW-009 linked-guardian attendance
+
+Active parents can open Family attendance for their school and view the 50 most recent attendance marks for a linked, active child. The API checks the relationship in the same query that reads the marks. It returns the corrected status, class, date and attendance mode without staff audit details. Authenticated responses use no-store, and the browser requests fresh data on focus and history restoration. Unlinking or suspending the parent membership denies subsequent reads. No new migration is needed.
+
+Disposable PostgreSQL verified unauthenticated, non-parent, unlinked, suspended and cross-school denial, corrected marks, and audit privacy. The final seven Edge journeys included the guardian reading the correction at mobile width and losing access after an administrator unlinked the child. PostgreSQL-required Go tests, vet and build, 198 frontend tests, security headers, and the Next.js lint, typecheck and production build passed. Participation reporting and targeted notices remain open.
+
+
+### SWW-009 daily participation report
+
+Assigned teachers see aggregate counts for a selected offering and school-local date. The report covers the whole eligible roster independently of roster pagination. It separates physical and remote attendance by status and counts unrecorded learners separately. It reads the saved current mark, including corrections. The endpoint returns only aggregate counts and never creates an attendance record. No migration was needed.
+
+Disposable PostgreSQL verified corrected totals, unrecorded separation, the prior arm after a transfer, authentication, parent and cross-school denial, future-date denial and revoked assignment access. In Edge the totals moved from unrecorded to Remote Present and then to Remote Late, while On site remained zero. All seven journeys, PostgreSQL-required Go tests, vet and build, 198 frontend tests, five security-header tests and Next.js production checks passed. Targeted notices remain open.
+
+
+### SWW-009 targeted school notices
+
+Migration 000026 stores published notices for one school, role, stage or class. Authorized owners, administrators and principals can publish through an authenticated CSRF-protected endpoint. The feed returns up to 50 recent notices. Role audiences require an active matching membership. Stage and class audiences use current enrollment for learners and active child links for guardians. Publishing and its audit commit together, and the notice text is rendered as plain text.
+
+Disposable PostgreSQL verified CSRF, role and tenant denial, invalid class targets, all four audience rules and access revocation after unlinking. The final seven Edge journeys included an administrator publishing a class notice and a linked parent seeing it with no publishing controls. PostgreSQL-required Go tests, vet and build, 198 frontend tests, five security-header tests and Next.js production checks passed. SWW-009 is complete for local acceptance.
+
+
+### SWW-010 versioned assessment scheme storage
+
+Migration 000027 stores numeric assessment schemes by tenant, term, stage and version. Components have positive maximum scores and exact decimal weights. Publication requires a total of exactly 100% and freezes the scheme and its components. Component writes lock and update the parent row, so publication from a stale PostgreSQL snapshot fails serialization. Early Years observations remain a separate qualitative workflow.
+
+Disposable PostgreSQL verified foreign-school denial, duplicate component names, empty and invalid weight totals, decimal publication at exactly 100%, immutability, new versions, and stale-snapshot denial. The PostgreSQL-required Go suite, vet and build passed. The authorized scheme editor, score entry, grade bands and published report snapshots remain open.
+
+
+### SWW-010 assessment scheme editor and publication
+
+Owners, administrators and principals can open Assessment schemes from an academic term, create one draft per numeric stage, edit the component names, maximum scores and decimal weights, and explicitly publish the saved revision. Archived terms and published versions are read-only. The API checks the tenant, uses revision preconditions, serializes version creation through the term, and commits the audit with the change. No new migration is needed beyond 000027.
+
+Disposable PostgreSQL verified teacher denial, cross-school denial, CSRF, duplicate drafts, invalid weight totals, stale edits and immutable publication. All seven Edge journeys passed, including correcting a 30.25% draft to exactly 100%, publishing it, reloading the published scheme and confirming the teacher could not open the editor. The full PostgreSQL-required Go suite, vet and build, 198 frontend tests, five security-header tests, and Next.js production checks passed. Grade bands, score entry and report snapshots remain open.
+
+
+### SWW-010 versioned grade bands
+
+Migration 000028 attaches optional grade bands to each assessment scheme version. Owners, administrators and principals can edit bands on a draft. PostgreSQL enforces inclusive bounds stored as integer hundredths of a percent, unique labels and non-overlapping ranges. Gaps and empty lists are allowed. Publication freezes the bands with the scheme, and existing versions remain readable.
+
+Disposable PostgreSQL verified that ranges sharing 70.00% are rejected without advancing the draft revision, that a retry with a 69.99% upper boundary succeeds, and that publication preserves the range. All seven Edge journeys passed, including correcting the overlap and reloading the published bands. PostgreSQL-required Go tests, vet and build, 198 frontend tests, five security-header tests, and Next.js lint, typecheck and production build passed. Score entry and published report snapshots remain open.
+
+
+### SWW-010 assessment score storage
+
+Migration 000029 adds one numeric score per enrollment placement, subject offering and assessment component. PostgreSQL checks that the published component belongs to the offering's term and stage, that the enrollment matches the class and any offering arm, and that scores have at most two decimal places and fall between zero and the component maximum. Tenant-scoped foreign keys and immutable score identity preserve the recorded relationship.
+
+Disposable PostgreSQL verified foreign-tenant rejection, negative and above-maximum rejection, excess decimal precision, duplicate prevention, and valid zero and maximum scores. The full PostgreSQL-required Go suite, vet and build passed. The score-entry API, teacher authorization, transactional audit, browser workflow and report snapshots remain open.
+
+
+### SWW-010 teacher score entry API
+
+Assigned teachers can read a paginated roster for a published component and save a score for an active placement in their offering. The Go API checks the school, offering, component and learner relationship. Writes require CSRF, use integer hundredths and reject stale revisions. The score and audit event commit together. Migration 000029 adds the score revision to the existing local definition.
+
+Disposable PostgreSQL verified authentication and CSRF, unknown placement and cross-school denial, decimal entry, HTTP 422 above the maximum, stale-version rejection, persisted edits, assignment revocation and exactly two audit events for the successful writes. The full PostgreSQL-required Go suite, vet and build passed. Component discovery, the score-entry interface and report publication remain open.

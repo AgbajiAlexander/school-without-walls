@@ -36,6 +36,7 @@ async function attemptCreate(page: Page, slug: string, includeCSRF: boolean) {
 }
 
 test("academic session persists and Go rejects missing CSRF, foreign schools and teacher writes", async ({ page, browser, baseURL }) => {
+  test.setTimeout(60_000);
   await signIn(page, "academic-owner@example.test");
   await page.goto(academicPath);
   await expect(page.getByRole("heading", { name: "Academic Management" })).toBeVisible();
@@ -92,7 +93,85 @@ test("academic session persists and Go rejects missing CSRF, foreign schools and
     await teacher.reload();
     await expect(teacher.getByText("2030/2031 fixture", { exact: true }).first()).toBeVisible();
     await expect(teacher.getByText("Denied fixture", { exact: true })).toHaveCount(0);
+    await verifySchoolMode(page, teacher);
+    await page.goto(academicPath);
+    await page.getByRole("button", { name: /Enrollment fixture session/ }).click();
+    await page.getByRole("listitem").filter({ hasText: "Fixture First Term" }).getByRole("link", { name: "Assessment schemes" }).click();
+    await expect(page.getByRole("heading", { name: "Assessment schemes", exact: true })).toBeVisible();
+    await page.getByLabel("Component name").fill("Fictional coursework");
+    await page.getByLabel("Maximum score").fill("20");
+    await page.getByLabel("Weight (%)").fill("30.25");
+    await page.getByRole("button", { name: "Save assessment draft" }).click();
+    await expect(page.getByRole("button", { name: "Publish scheme" })).toBeDisabled();
+    await page.getByRole("button", { name: "Edit assessment draft", exact: true }).click();
+    await page.getByRole("button", { name: "Add component" }).click();
+    const second = page.getByRole("group", { name: "Component 2" });
+    await second.getByLabel("Component name").fill("Fictional examination");
+    await second.getByLabel("Maximum score").fill("50");
+    await second.getByLabel("Weight (%)").fill("69.75");
+    await page.getByRole("button", { name: "Add grade band" }).click();
+    const upper = page.getByRole("group", { name: "Grade band 1", exact: true });
+    await upper.getByLabel("Grade label").fill("A");
+    await upper.getByLabel("Minimum (%)").fill("70");
+    await upper.getByLabel("Maximum (%)").fill("100");
+    await page.getByRole("button", { name: "Add grade band" }).click();
+    const lower = page.getByRole("group", { name: "Grade band 2", exact: true });
+    await lower.getByLabel("Grade label").fill("B");
+    await lower.getByLabel("Minimum (%)").fill("0");
+    await lower.getByLabel("Maximum (%)").fill("70");
+    await page.getByRole("button", { name: "Save assessment draft" }).click();
+    await expect(page.getByRole("alert").filter({ hasText: "Bands cannot overlap" })).toBeVisible();
+    await lower.getByLabel("Maximum (%)").fill("69.99");
+    await page.getByRole("button", { name: "Save assessment draft" }).click();
+    await page.getByRole("button", { name: "Publish scheme" }).click();
+    await page.getByRole("button", { name: "Confirm publication" }).click();
+    await expect(page.getByText("Assessment scheme published.")).toBeVisible();
+    await page.reload();
+    await expect(page.getByText(/Published.*100\.00%/)).toBeVisible();
+    await expect(page.getByText("B: 0.00% to 69.99%")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Edit assessment draft", exact: true })).toHaveCount(0);
+    await teacher.goto(page.url());
+    await expect(teacher.getByText("Assessment schemes are unavailable for this term or account.")).toBeVisible();
   } finally {
     await teacherContext.close();
   }
 });
+
+
+async function verifySchoolMode(page: Page, teacher: Page) {
+  const settings = "/schools/" + school + "/settings";
+
+  await page.goto(settings);
+  await expect(page.getByRole("heading", { name: "School operating mode" })).toBeVisible();
+  const start = new Date(Date.now() - 3600000).toISOString().slice(0, 16);
+  const end = new Date(Date.now() + 3600000).toISOString().slice(0, 16);
+  await page.getByRole("combobox", { name: "Operating mode", exact: true }).selectOption("REMOTE");
+  await page.getByLabel("Starts (UTC)").fill(start);
+  await page.getByLabel("Ends (UTC)").fill(end);
+  await page.getByLabel("Reason", { exact: true }).fill("Fictional building maintenance");
+  await page.getByLabel("Where to get help").fill("Contact the fictional office");
+  await page.getByLabel("Schedule link").fill("https://schedule.example.test/fictional");
+  await page.getByRole("button", { name: "Save operating mode" }).click();
+  await expect(page.getByText("Current mode: Remote")).toBeVisible();
+
+  await teacher.goto("/dashboard");
+  const schoolCard = teacher.getByRole("article").filter({ hasText: "Fictional Academic School A" });
+  await expect(schoolCard.getByRole("heading", { name: "Remote learning" })).toBeVisible();
+  await expect(schoolCard.getByText("Fictional building maintenance")).toBeVisible();
+  await expect(schoolCard.getByRole("link", { name: "View school schedule" })).toHaveAttribute("href", "https://schedule.example.test/fictional");
+  await expect(teacher.getByRole("article").filter({ hasText: "Fictional Classroom School" })
+    .getByRole("heading", { name: "Remote learning" })).toHaveCount(0);
+
+  await page.getByRole("combobox", { name: "Operating mode", exact: true }).selectOption("HYBRID");
+  await page.getByRole("button", { name: "Save operating mode" }).click();
+  await expect(page.getByText("Current mode: Hybrid")).toBeVisible();
+  await teacher.reload();
+  await expect(schoolCard.getByRole("heading", { name: "Hybrid learning" })).toBeVisible();
+
+  await page.getByRole("combobox", { name: "Operating mode", exact: true }).selectOption("ON_SITE");
+  await page.getByRole("button", { name: "Save operating mode" }).click();
+  await expect(page.getByText("Current mode: On site")).toBeVisible();
+  await teacher.reload();
+  await expect(schoolCard.getByRole("heading", { name: "Fictional Academic School A" })).toBeVisible();
+  await expect(schoolCard.getByRole("region", { name: "School operating mode" })).toHaveCount(0);
+}

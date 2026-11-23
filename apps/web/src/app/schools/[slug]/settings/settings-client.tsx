@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { canInviteStaff, establishCSRFToken, updateTenantSettings } from "@/lib/tenant-client";
 import type { Tenant } from "@/lib/tenant-client";
+import SchoolModeForm from "./school-mode-form";
 import StaffInvitationForm from "./staff-invitation-form";
 
 const stages = [
@@ -132,6 +133,7 @@ export default function SettingsClient({ tenant, csrfToken }: { tenant: Tenant; 
             </button>
           </form>
         </section>
+        {tenant.can_manage_academics === true && <SchoolModeForm key={"mode-" + tenant.id} tenant={tenant} csrf={csrfToken} />}
         {canInviteStaff(tenant) && <StaffInvitationForm key={tenant.id} schoolId={tenant.id} schoolSlug={tenant.slug} onAuthorizationDenied={refresh} />}
       </div>
     </main>

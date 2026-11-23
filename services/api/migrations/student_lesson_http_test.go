@@ -3,6 +3,7 @@ package migrations
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,7 +128,92 @@ func testStudentLessonHTTP(t *testing.T, ctx context.Context, pool *pgxpool.Pool
 		school, lesson, student).Scan(&count); err != nil || count != 1 {
 		t.Fatal("expected exactly one progress record for the authenticated learner")
 	}
+	assignments := detail + "/assignments"
+	write(`INSERT INTO assignments (id,tenant_id,lesson_id,title,instructions,due_at,max_score,submission_type)
+		VALUES ($1,$2,$3,'Private homework draft','Keep private.',clock_timestamp()+interval '1 day',10,'TEXT')`,
+		uuid.New(), school, lesson)
+	get(assignments, "", 401)
+	if body := get(assignments, token, 200); !strings.Contains(body, "Counting practice") || strings.Contains(body, "Private homework draft") {
+		t.Fatal("student assignment list must expose released assignments only")
+	}
+	if body := get(strings.Replace(assignments, "lesson-fixture-a", "lesson-fixture-b", 1), token, 200); strings.Contains(body, "Counting practice") {
+		t.Fatal("foreign school disclosed an assignment")
+	}
+	createHomework := func(permit bool, kind string) uuid.UUID {
+		t.Helper()
+		id := uuid.New()
+		write(`INSERT INTO assignments (id,tenant_id,lesson_id,title,instructions,due_at,max_score,submission_type,allow_resubmission)
+			VALUES ($1,$2,$3,'Submission fixture','Write an answer.',clock_timestamp()+interval '1 day',10,$4,$5)`,
+			id, school, lesson, kind, permit)
+		write(`UPDATE assignments SET status='OPEN' WHERE id=$1`, id)
+		return id
+	}
+	one := createHomework(false, "TEXT")
+	multiple := createHomework(true, "TEXT")
+	file := createHomework(false, "FILE")
+	send := func(path, header, body string, want int) string {
+		t.Helper()
+		req := httptest.NewRequest("POST", path, strings.NewReader(body))
+		req.AddCookie(&http.Cookie{Name: auth.CookieName, Value: token})
+		req.Header.Set(auth.HeaderCSRF, header)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+		if rec.Code != want {
+			t.Fatalf("submission status %d, want %d", rec.Code, want)
+		}
+		return rec.Body.String()
+	}
+	submission := func(id uuid.UUID) string { return assignments + "/" + id.String() + "/submissions" }
+	body := func(key uuid.UUID, answer string) string {
+		return fmt.Sprintf(`{"request_id":%q,"content":%q}`, key, answer)
+	}
+	key := uuid.New()
+	original := body(key, "A fictional private answer")
+	send(submission(one), "", original, 403)
+	send(strings.Replace(submission(one), "lesson-fixture-a", "lesson-fixture-b", 1), csrf, original, 404)
+	send(submission(one), csrf, `{"student_id":"wrong","content":"forged"}`, 422)
+	send(submission(file), csrf, original, 409)
+	expiring := uuid.New()
+	write(`INSERT INTO assignments (id,tenant_id,lesson_id,title,instructions,due_at,max_score,submission_type)
+		VALUES ($1,$2,$3,'Deadline fixture','Write an answer.',clock_timestamp()+interval '3 seconds',10,'TEXT')`,
+		expiring, school, lesson)
+	write(`UPDATE assignments SET status='OPEN' WHERE id=$1`, expiring)
+	write(`SELECT pg_sleep_until(due_at) FROM assignments WHERE id=$1`, expiring)
+	send(submission(expiring), csrf, original, 409)
+	receiptData := func(reply string) string {
+		t.Helper()
+		var decoded struct{ Data json.RawMessage }
+		if err := json.Unmarshal([]byte(reply), &decoded); err != nil || len(decoded.Data) == 0 {
+			t.Fatal("invalid submission receipt")
+		}
+		return string(decoded.Data)
+	}
+	firstAnswer := receiptData(send(submission(one), csrf, original, 201))
+	if replay := receiptData(send(submission(one), csrf, original, 200)); replay != firstAnswer {
+		t.Fatal("retry must return the original receipt")
+	}
+	send(submission(one), csrf, body(key, "Changed answer"), 409)
+	send(submission(one), csrf, body(uuid.New(), "Second answer"), 409)
+	send(submission(multiple), csrf, original, 201)
+	if reply := send(submission(multiple), csrf, body(uuid.New(), "Revised answer"), 201); !strings.Contains(reply, `"revision":2`) {
+		t.Fatal("enabled resubmission must create a new revision")
+	}
+	write(`UPDATE assignments SET status='CLOSED' WHERE id=$1`, multiple)
+	send(submission(multiple), csrf, body(uuid.New(), "Late answer"), 409)
+	if listed := get(assignments, token, 200); !strings.Contains(listed, `"submission":{"revision":2`) || strings.Contains(listed, "private answer") {
+		t.Fatal("student assignment list must return receipt metadata without answer text")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM assignment_submissions WHERE tenant_id=$1 AND student_id=$2`, school, student).Scan(&count); err != nil || count != 3 {
+		t.Fatal("only accepted revisions may create submission records")
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM audit_events WHERE tenant_id=$1 AND actor_id=$2 AND action='learning.assignment.submit'`, school, user).Scan(&count); err != nil || count != 3 {
+		t.Fatal("only accepted revisions may produce submission audits")
+	}
 	write(`UPDATE enrollments SET status='ENDED',ended_at=clock_timestamp() WHERE id=$1`, enrollment)
+	send(submission(one), csrf, original, 404)
+	if body := get(assignments, token, 200); strings.Contains(body, "Counting practice") {
+		t.Fatal("ended enrollment disclosed an assignment")
+	}
 	progress(progressURL, token, csrf, complete, 404)
 	get(detail, token, 404)
 	if body := get(endpoint, token, 200); strings.Contains(body, lesson.String()) {

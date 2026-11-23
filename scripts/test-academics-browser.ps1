@@ -171,6 +171,15 @@ BEGIN
     FROM curriculum_framework_versions WHERE title='Fictional British Framework';
     INSERT INTO students (id,tenant_id,user_id,admission_no,display_name,stage) VALUES
     (student_id_value,school_id,learner_id,'ROOM-1','Fictional Learner','PRIMARY');
+    INSERT INTO users (id,email,password_hash,full_name,status,verified_at)
+    SELECT '33bead58-4548-45ec-a667-9d3fd4c73294','academic-family@example.test',password_hash,'Fictional Parent','ACTIVE',clock_timestamp()
+    FROM users WHERE id=teacher_id;
+    INSERT INTO memberships (id,tenant_id,user_id,role) VALUES
+    (gen_random_uuid(),school_id,'33bead58-4548-45ec-a667-9d3fd4c73294','PARENT');
+    INSERT INTO guardians (id,tenant_id,user_id,display_name) VALUES
+    ('124acf1f-3f16-4054-8c27-2a2dd29f5795',school_id,'33bead58-4548-45ec-a667-9d3fd4c73294','Fictional Parent');
+    INSERT INTO student_guardians (tenant_id,student_id,guardian_id,relationship) VALUES
+    (school_id,student_id_value,'124acf1f-3f16-4054-8c27-2a2dd29f5795','Parent');
     INSERT INTO enrollments (id,tenant_id,student_id,session_id,term_id,class_id) VALUES
     (gen_random_uuid(),school_id,student_id_value,session_id_value,term_id_value,class_id_value);
     INSERT INTO lessons (id,tenant_id,offering_id,author_membership_id,curriculum_selection_id,primary_objective_id,title,content) VALUES

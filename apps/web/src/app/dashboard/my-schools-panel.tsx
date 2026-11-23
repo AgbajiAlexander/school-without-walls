@@ -116,6 +116,17 @@ export default function MySchoolsPanel() {
                   Role: {school.current_role?.replaceAll("_", " ") ?? "Member"}
                 </p>
 
+                {school.operating_schedule && school.effective_mode !== "ON_SITE" && school.effective_mode && (
+                  <section aria-label="School operating mode" className="mt-3 space-y-1 rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-950">
+                    <h4 className="font-semibold">{school.effective_mode === "REMOTE" ? "Remote learning" : "Hybrid learning"}</h4>
+                    {school.operating_schedule.reason && <p className="break-words">{school.operating_schedule.reason}</p>}
+                    {school.operating_schedule.help && <p className="break-words">{school.operating_schedule.help}</p>}
+                    {school.operating_schedule.schedule_url?.startsWith("https://") && (
+                      <a className="inline-block min-h-11 py-2 underline" href={school.operating_schedule.schedule_url}
+                        rel="noreferrer">View school schedule</a>
+                    )}
+                  </section>
+                )}
                 <div className="mt-4 flex flex-wrap gap-3">
                   <Link
                     href={`${base}/academics`}
@@ -145,6 +156,14 @@ export default function MySchoolsPanel() {
                     <a href={`${base}/teaching`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
                       Teaching lessons
                     </a>
+                  )}
+                  <Link prefetch={false} href={base + "/notices"} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                    School notices
+                  </Link>
+                  {school.can_view_child_attendance === true && (
+                    <Link prefetch={false} href={base + "/family/attendance"} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
+                      Family attendance
+                    </Link>
                   )}
                   {school.can_read_lessons === true && (
                     <Link href={`${base}/learning`} className="min-h-11 rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-800">
