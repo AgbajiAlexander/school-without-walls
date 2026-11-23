@@ -141,7 +141,10 @@ const memberSchoolQuery = `
 	SELECT t.id, t.slug::text, t.name, t.status::text, t.locale, t.timezone,
 		t.branding, t.feature_flags, t.education_stages, t.created_at, t.updated_at,
 		MIN(m.role), BOOL_OR(m.role = 'SCHOOL_OWNER'),
-		BOOL_OR(m.role IN ('SCHOOL_OWNER', 'SCHOOL_ADMIN', 'PRINCIPAL')), BOOL_OR(m.role = 'STUDENT'), BOOL_OR(m.role = 'TEACHER'), BOOL_OR(m.role IN ('SCHOOL_OWNER','SCHOOL_ADMIN'))
+		BOOL_OR(m.role IN ('SCHOOL_OWNER', 'SCHOOL_ADMIN', 'PRINCIPAL')), BOOL_OR(m.role = 'STUDENT'), BOOL_OR(m.role = 'TEACHER'), BOOL_OR(m.role = 'PARENT'), BOOL_OR(m.role IN ('SCHOOL_OWNER','SCHOOL_ADMIN')),
+		CASE WHEN t.operating_mode<>'ON_SITE' THEN jsonb_build_object('mode',t.operating_mode,'starts_at',t.mode_starts_at,
+			'ends_at',t.mode_ends_at,'reason',t.mode_reason,'help',t.mode_help,'schedule_url',t.mode_schedule_url) END,
+		CASE WHEN statement_timestamp()>=t.mode_starts_at AND statement_timestamp()<t.mode_ends_at THEN t.operating_mode ELSE 'ON_SITE' END
 	FROM tenants t
 	JOIN memberships m ON m.tenant_id = t.id
 	JOIN users u ON u.id = m.user_id
@@ -229,7 +232,7 @@ func scanTenantWithRole(row rowScanner) (*Tenant, error) {
 	err := row.Scan(
 		&tenant.ID, &tenant.Slug, &tenant.Name, &tenant.Status, &tenant.Locale,
 		&tenant.Timezone, &branding, &flags, &tenant.EducationStages,
-		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole, &tenant.CanInviteStaff, &tenant.CanManageAcademics, &tenant.CanReadLessons, &tenant.CanTeachLessons, &tenant.CanManageLessonReview,
+		&tenant.CreatedAt, &tenant.UpdatedAt, &tenant.CurrentRole, &tenant.CanInviteStaff, &tenant.CanManageAcademics, &tenant.CanReadLessons, &tenant.CanTeachLessons, &tenant.CanViewChildAttendance, &tenant.CanManageLessonReview, &tenant.OperatingSchedule, &tenant.EffectiveMode,
 	)
 	if err != nil {
 		return nil, err

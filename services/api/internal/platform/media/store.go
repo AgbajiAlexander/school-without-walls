@@ -111,10 +111,30 @@ func (s *Store) ScanAndPromote(ctx context.Context, o Object, scanner Scanner) e
 	if err != nil {
 		return err
 	}
+	return s.scanAndStore(ctx, o, data, scanner)
+}
+
+// StoreScannedUpload validates and scans a bounded server-side upload before
+// writing any bytes to a downloadable object.
+func (s *Store) StoreScannedUpload(ctx context.Context, o Object, data []byte, scanner Scanner) error {
+	if !o.valid() || Validate(data, o.Size, o.Type) != nil {
+		return ErrInvalidObject
+	}
+	digest := sha256.Sum256(data)
+	if base64.StdEncoding.EncodeToString(digest[:]) != o.Checksum {
+		return ErrInvalidObject
+	}
+	if scanner == nil {
+		return ErrScannerUnavailable
+	}
+	return s.scanAndStore(ctx, o, data, scanner)
+}
+
+func (s *Store) scanAndStore(ctx context.Context, o Object, data []byte, scanner Scanner) error {
 	if err := scanner.Scan(ctx, data); err != nil {
 		return err
 	}
-	_, err = s.client.PutObject(ctx, &s3.PutObjectInput{
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(s.bucket), Key: aws.String(o.key("ready")), Body: bytes.NewReader(data),
 		ContentLength: aws.Int64(int64(o.Size)), ContentType: aws.String(o.Type),
 		ChecksumSHA256: aws.String(o.Checksum), IfNoneMatch: aws.String("*"),

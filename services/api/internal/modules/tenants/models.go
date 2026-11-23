@@ -17,23 +17,26 @@ var (
 )
 
 type Tenant struct {
-	ID                    uuid.UUID       `json:"id"`
-	Slug                  string          `json:"slug"`
-	Name                  string          `json:"name"`
-	Status                string          `json:"status"`
-	Locale                string          `json:"locale"`
-	Timezone              string          `json:"timezone"`
-	Branding              map[string]any  `json:"branding"`
-	FeatureFlags          map[string]bool `json:"feature_flags"`
-	EducationStages       []string        `json:"education_stages"`
-	CreatedAt             time.Time       `json:"created_at"`
-	UpdatedAt             time.Time       `json:"updated_at"`
-	CurrentRole           string          `json:"current_role,omitempty"`
-	CanInviteStaff        bool            `json:"can_invite_staff"`
-	CanManageAcademics    bool            `json:"can_manage_academics"`
-	CanReadLessons        bool            `json:"can_read_lessons"`
-	CanTeachLessons       bool            `json:"can_teach_lessons"`
-	CanManageLessonReview bool            `json:"can_manage_lesson_review"`
+	CanViewChildAttendance bool            `json:"can_view_child_attendance,omitempty"`
+	OperatingSchedule      *SchoolMode     `json:"operating_schedule,omitempty"`
+	EffectiveMode          string          `json:"effective_mode,omitempty"`
+	ID                     uuid.UUID       `json:"id"`
+	Slug                   string          `json:"slug"`
+	Name                   string          `json:"name"`
+	Status                 string          `json:"status"`
+	Locale                 string          `json:"locale"`
+	Timezone               string          `json:"timezone"`
+	Branding               map[string]any  `json:"branding"`
+	FeatureFlags           map[string]bool `json:"feature_flags"`
+	EducationStages        []string        `json:"education_stages"`
+	CreatedAt              time.Time       `json:"created_at"`
+	UpdatedAt              time.Time       `json:"updated_at"`
+	CurrentRole            string          `json:"current_role,omitempty"`
+	CanInviteStaff         bool            `json:"can_invite_staff"`
+	CanManageAcademics     bool            `json:"can_manage_academics"`
+	CanReadLessons         bool            `json:"can_read_lessons"`
+	CanTeachLessons        bool            `json:"can_teach_lessons"`
+	CanManageLessonReview  bool            `json:"can_manage_lesson_review"`
 }
 
 type ProvisionRequest struct {

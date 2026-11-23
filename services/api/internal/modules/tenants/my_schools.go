@@ -55,6 +55,7 @@ func (m *MockRepository) ListForMember(
 		tenant.CanManageAcademics = mockCanManageAcademics(role)
 		tenant.CanReadLessons = role == "STUDENT"
 		tenant.CanTeachLessons = role == "TEACHER"
+		tenant.CanViewChildAttendance = role == "PARENT"
 		tenant.CanManageLessonReview = role == "SCHOOL_OWNER" || role == "SCHOOL_ADMIN"
 		result = append(result, tenant)
 	}

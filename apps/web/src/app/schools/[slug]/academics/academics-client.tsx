@@ -382,6 +382,10 @@ export default function AcademicsClient({
                         <p className="font-semibold text-slate-900">
                           {term.sequence}. {term.name}
                         </p>
+                        {canManage && <Link className="inline-block min-h-11 py-2 text-sm text-green-800 underline"
+                          href={"/schools/" + encodeURIComponent(school.slug) + "/academics/terms/" + encodeURIComponent(term.id) + "/assessment"}>
+                          Assessment schemes
+                        </Link>}
                         <p className="mt-1 text-sm text-slate-600">
                           {formatDate(term.starts_on)} to{" "}
                           {formatDate(term.ends_on)}

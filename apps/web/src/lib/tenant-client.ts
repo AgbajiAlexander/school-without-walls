@@ -3,6 +3,15 @@
 import { getCSRFToken, setCSRFToken } from "@/lib/auth-client";
 
 export interface Tenant {
+  effective_mode?: "ON_SITE" | "HYBRID" | "REMOTE";
+  operating_schedule?: {
+    mode: "ON_SITE" | "HYBRID" | "REMOTE";
+    starts_at?: string;
+    ends_at?: string;
+    reason?: string;
+    help?: string;
+    schedule_url?: string;
+  };
   id: string;
   slug: string;
   name: string;
@@ -17,6 +26,7 @@ export interface Tenant {
   can_invite_staff?: boolean;
   can_manage_academics?: boolean;
   can_read_lessons?: boolean;
+  can_view_child_attendance?: boolean;
   can_teach_lessons?: boolean;
 }
 

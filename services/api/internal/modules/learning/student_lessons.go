@@ -58,7 +58,7 @@ const studentLessonQuery = `
 		COALESCE((SELECT ` + progressState + ` FROM lesson_progress progress
 			WHERE progress.tenant_id=t.id AND progress.lesson_id=l.id AND progress.student_id=s.id), 'NOT_STARTED') AS progress_state` + studentLessonScope + ` ORDER BY l.id LIMIT 51`
 
-const studentLessonScope = `
+const studentLessonJoins = `
 	FROM tenants t JOIN users u ON u.id=$2 AND u.status='ACTIVE'
 	JOIN memberships m ON m.tenant_id=t.id AND m.user_id=u.id AND m.role='STUDENT' AND m.status='ACTIVE'
 	JOIN students s ON s.tenant_id=t.id AND s.user_id=u.id AND s.status='ACTIVE'
@@ -73,11 +73,17 @@ const studentLessonScope = `
 	JOIN subjects subject ON subject.tenant_id=t.id AND subject.id=o.subject_id AND subject.status='ACTIVE'
 	JOIN lessons l ON l.tenant_id=t.id AND l.offering_id=o.id AND l.status='PUBLISHED'
 	JOIN curriculum_objectives objective ON objective.id=l.primary_objective_id
+	`
+
+const studentLessonEligibility = `
 	WHERE t.slug=$1::citext AND t.status='ACTIVE'
 	  AND (e.class_arm_id IS NULL OR arm.status='ACTIVE')
 	  AND (statement_timestamp() AT TIME ZONE t.timezone)::date BETWEEN term.starts_on AND term.ends_on
 	  AND l.published_at <= statement_timestamp()
-	  AND ($3::uuid IS NULL OR l.id=$3) AND ($4::uuid IS NULL OR l.id>$4)
+	  `
+
+const studentLessonScope = studentLessonJoins + studentLessonEligibility + `
+	AND ($3::uuid IS NULL OR l.id=$3) AND ($4::uuid IS NULL OR l.id>$4)
 `
 
 func (h *Handler) ListStudentLessons(w http.ResponseWriter, r *http.Request) {

@@ -57,6 +57,7 @@ func TestPostgresTenantIsolationAndSettings(t *testing.T) {
 		"000002_auth_identity.up.sql",
 		"000003_auth_hardening.up.sql",
 		"000004_tenants.up.sql",
+		"000024_school_operating_mode.up.sql",
 	} {
 		applyTenantMigrationForTest(t, ctx, pool, filepath.Join("..", "..", "..", "migrations", name))
 	}

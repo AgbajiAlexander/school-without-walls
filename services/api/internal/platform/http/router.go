@@ -42,6 +42,8 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 
 	var peopleH *people.Handler
 	var learningH *learning.Handler
+	var assessmentH *academics.AssessmentHandler
+	var schoolModeH *tenants.SchoolModeHandler
 	var curriculumH *curriculum.Handler
 	authRepo := cfg.AuthRepo
 	tenantRepo := cfg.TenantRepo
@@ -62,12 +64,14 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			authRepo = auth.NewPostgresRepository(dbWrapper.Pool)
 			tenantRepo = tenants.NewPostgresRepositoryWithStaffLimits(dbWrapper.Pool, cfg.Config.StaffInvitations)
 			academicRepo = academics.NewPostgresRepository(dbWrapper.Pool)
+			assessmentH = academics.NewAssessmentHandler(dbWrapper.Pool)
 			structureRepo = academics.NewStructureRepository(dbWrapper.Pool)
 			subjectRepo = academics.NewSubjectRepository(dbWrapper.Pool)
 			offeringRepo = academics.NewSubjectOfferingRepository(dbWrapper.Pool)
 			assignmentRepo = academics.NewTeacherAssignmentRepository(dbWrapper.Pool)
 			peopleH = people.NewHandler(people.NewRepository(dbWrapper.Pool))
 			learningH = learning.NewHandler(dbWrapper.Pool)
+			schoolModeH = tenants.NewSchoolModeHandler(dbWrapper.Pool)
 			if cfg.Config.LessonMedia != nil {
 				m := cfg.Config.LessonMedia
 				store, err := media.NewStore(media.StoreConfig{Endpoint: m.Endpoint, Bucket: m.Bucket, Region: m.Region, AccessKey: m.AccessKey, SecretKey: m.SecretKey})
@@ -221,6 +225,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			protected.Get("/my/schools", tenantH.ListMine)
 			protected.Get("/tenants/{slug}/settings", tenantH.GetSettings)
 			protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/settings", tenantH.UpdateSettings)
+			if schoolModeH != nil {
+				protected.With(auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/school/mode", schoolModeH.Update)
+			}
 			if staffInvitationH != nil {
 				protected.With(auth.RequireCSRF(authSvc)).Post(
 					"/tenants/{slug}/staff-invitations",
@@ -229,17 +236,42 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			}
 		})
 
+		if assessmentH != nil {
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/terms/{termID}/assessment-schemes", assessmentH.List)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/terms/{termID}/assessment-schemes", assessmentH.Create)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/terms/{termID}/assessment-schemes/{schemeID}", assessmentH.Edit)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/terms/{termID}/assessment-schemes/{schemeID}/publish", assessmentH.Publish)
+		}
+
 		if learningH != nil {
 			if cfg.Config.LessonMedia != nil {
 				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media", learningH.UploadLessonMedia)
 				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/media/{mediaID}/complete", learningH.CompleteLessonMedia)
 				v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}/media", learningH.DownloadLessonMedia)
+				v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/learning/lessons/{lessonID}/assignments/{assignmentID}/file", learningH.UploadAssignmentFile)
+				v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}/submissions/{submissionID}/file", learningH.DownloadAssignmentFile)
 				v1.With(auth.RequireAuth).Get("/tenants/{slug}/lesson-reviews/{lessonID}/media", learningH.DownloadReviewAttachment)
 			}
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons", learningH.ListStudentLessons)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}", learningH.GetStudentLesson)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/learning/lessons/{lessonID}/assignments", learningH.ListStudentAssignments)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/learning/lessons/{lessonID}/assignments/{assignmentID}/submissions", learningH.SubmitAssignment)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}/assignments", learningH.ListTeacherAssignments)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}/submissions", learningH.ListSubmissionsForReview)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}/submissions/{submissionID}/feedback", learningH.ReturnAssignmentFeedback)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/assignments", learningH.CreateAssignment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Patch("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}", learningH.EditAssignment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}/open", learningH.OpenAssignment)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/teaching/lessons/{lessonID}/assignments/{assignmentID}/close", learningH.CloseAssignment)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/learning/lessons/{lessonID}/progress", learningH.SetLessonProgress)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings", learningH.ListTeachingOfferings)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/components/{componentID}/scores", learningH.ListAssessmentScores)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/teaching/offerings/{offeringID}/components/{componentID}/scores/{placementID}", learningH.SaveAssessmentScore)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/attendance", learningH.ListAttendanceRoster)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/attendance/summary", learningH.GetAttendanceSummary)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/family/attendance", learningH.ListAttendanceChildren)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/family/attendance/{studentID}", learningH.GetChildAttendance)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/teaching/offerings/{offeringID}/attendance", learningH.SaveAttendance)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/offerings/{offeringID}/objectives", learningH.ListTeachingObjectives)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons", learningH.ListTeacherLessons)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/teaching/lessons/{lessonID}", learningH.GetTeacherLesson)
@@ -281,6 +313,9 @@ func NewRouter(cfg RouterConfig) (http.Handler, error) {
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/students/{studentID}", peopleH.GetStudent)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}", peopleH.UpdateStudent)
 			v1.With(auth.RequireAuth).Get("/tenants/{slug}/guardians", peopleH.ListGuardians)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/notices", peopleH.ListNotices)
+			v1.With(auth.RequireAuth).Get("/tenants/{slug}/notices/classes", peopleH.NoticeClasses)
+			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/notices", peopleH.PublishNotice)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Post("/tenants/{slug}/guardians", peopleH.CreateGuardian)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/guardians/{guardianID}", peopleH.UpdateGuardian)
 			v1.With(auth.RequireAuth, auth.RequireCSRF(authSvc)).Put("/tenants/{slug}/students/{studentID}/guardians/{guardianID}", peopleH.LinkGuardian)

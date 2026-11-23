@@ -86,6 +86,7 @@ func TestPostgresStaffInvitationRepository(t *testing.T) {
 		"000003_auth_hardening.up.sql",
 		"000004_tenants.up.sql",
 		"000008_staff_invitation_delivery.up.sql",
+		"000024_school_operating_mode.up.sql",
 	} {
 		applyTenantMigrationForTest(t, ctx, pool,
 			filepath.Join("..", "..", "..", "migrations", name))
